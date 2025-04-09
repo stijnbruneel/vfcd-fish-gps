@@ -1,0 +1,2403 @@
+---
+title: "Precision"
+author: "Stijn Bruneel"
+date: "31-8-2021"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+# knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+```{r warning=FALSE, message=FALSE, include=FALSE}
+source("./source/Libraries.R")
+source("./source/Transformation_data.R")
+source("./source/Personal_DISPERSION.R")
+source("./source/Personal_PERMANOVA.R")
+source("./source/pairwise_adonis.R")
+```
+
+```{r echo=FALSE}
+#List with species names
+specieslist=read_excel("./data/external/specieslist.xlsx")
+specieslist=as.data.frame(specieslist[,2])
+colnames(specieslist)="Species"
+specieslist<-t(specieslist)
+colnames(specieslist)<-specieslist
+```
+
+```{r warning=FALSE}
+N1=read_excel("./data/external/N1_Time.xlsx") #biological data (processed)
+Habitat=read_excel("./data/external/cleansed_video_data_transect.xlsx") #biolgical data (unprocessed) 
+```
+
+```{r warning=FALSE}
+N1<-N1[which(N1$Date!=as.POSIXct("2019-02-15",tz="GMT")),] #remove one day with questionable data (close to sunset which caused drop in visibility)
+```
+
+```{r}
+#Preprocessing variables in N1
+N1$DateTime=paste(N1$OnlyDate,N1$OnlyTimeAverage)
+N1$DateTime=as.POSIXct(N1$DateTime, format="%Y-%m-%d %Hh%M",tz="utc")
+N1$DateTide=paste(N1$OnlyDate,N1$`Low Tide`)
+N1$DateTide=as.POSIXct(N1$DateTide, format="%Y-%m-%d %Hh%M",tz="utc")
+N1$TideDif<-as.numeric(difftime(N1$DateTime,N1$DateTide,units="mins"))
+N1$NumericTime<-as.numeric(difftime(as.POSIXct(paste(N1$OnlyDate[1],N1$OnlyTimeAverage), format="%Y-%m-%d %Hh%M",tz="utc")[1],as.POSIXct(paste(N1$OnlyDate[1],N1$OnlyTimeAverage), format="%Y-%m-%d %Hh%M",tz="utc"),units = "mins"))
+N1$TideDif<-as.numeric(difftime(N1$DateTime,N1$DateTide,units="mins"))
+N1$Date=as.character(N1$OnlyDate)
+N1$fDate=as.factor(N1$Date)
+
+N1$datetime=paste(N1$OnlyDate,N1$OnlyTime)
+N1$datetimeAverage=paste(N1$OnlyDate,N1$OnlyTimeAverage)
+N1$datetime=as.POSIXct(N1$datetime,format="%Y-%m-%d %Hh%M",tz="uct")
+N1$datetimeAverage=as.POSIXct(N1$datetimeAverage,format="%Y-%m-%d %Hh%M",tz="uct")
+N1$difftime<-difftime(N1$datetime,N1$datetime[1],units="mins")
+N1$difftimeAverage<-difftime(N1$datetimeAverage,N1$datetimeAverage[1],units="mins")
+N1$Data_Transect=paste(N1$Date,N1$`Transect number`)
+N1$fData_Transect=as.factor(N1$Data_Transect)
+N1$fTransect=as.factor(N1$`Transect number`)
+N1$fRepetition=as.factor(N1$Repetition)
+```
+
+```{r}
+#Multivariate precision function based on residuals PERMANOVA (there have not been much adaptions to the code from the optimization Code)
+MSE.d = function (data.repeat.10, group, factors, nresamp = 100, ...) {
+  
+  # Some necessary preliminary functions:            
+  MSE = function(data.repeat.10) {
+    type="adonis"
+    perm.species.amount=Personal_PERMANOVA(data.repeat=data.repeat.10,factors=factors,response='fish.dist',algo='+',type=type,transform="4root")
+    if (type=="adonis"){
+      perm.species.amount=perm.species.amount$aov.tab
+      MSE=perm.species.amount$SumsOfSqs[length(perm.species.amount$SumsOfSqs)-1]/perm.species.amount$Df[length(perm.species.amount$Df)-1]
+    }
+    if (type=="adonis2"){
+      MSE=perm.species.amount$SumOfSqs[length(perm.species.amount$SumOfSqs)-1]/perm.species.amount$Df[length(perm.species.amount$Df)-1]
+    }
+    return(MSE)
+  }
+  quant.upper = function(x) quantile(x, prob = 0.975, na.rm = TRUE)
+  quant.lower = function(x) quantile(x, prob = 0.025, na.rm = TRUE)
+  
+  # Getting parameters of the problem
+  group = factor(group)
+  ng = length(levels(group))
+  n.i = table(group)
+  nmax = min(n.i)
+  N = sum(n.i)
+  index = 1:N 
+  
+  # Setting up the vectors for the results
+  # Note that these do not have to be separate whole matrices now.
+  means <- means.b <- lower <- upper <- rep(0,nmax)
+  
+  # One matrix is used to store the values under permutation resampling for each sample size
+  multSE.store.p = matrix(rep(0,nresamp*nmax), ncol = nmax, nrow = nresamp)
+  # One matrix is used to store the values under bootstrap resampling for each sample size
+  multSE.store.b = matrix(rep(0,nresamp*nmax), ncol = nmax, nrow = nresamp)
+  
+  # Resampling loop for each sample size.
+  for (nsub in 2:nmax) {
+    for (iresamp in 1:nresamp) {
+      ivec.p = sample(index[group==levels(group)[1]], size = nsub, replace = FALSE)
+      ivec.b = sample(index[group==levels(group)[1]], size = nsub, replace = TRUE)
+      for (i in 2:ng) {
+        ivec.p = c(ivec.p,sample(index[group==levels(group)[i]], size = nsub, replace = FALSE))
+        ivec.b = c(ivec.b,sample(index[group==levels(group)[i]], size = nsub, replace = TRUE))
+      }
+      group.resamp = factor(rep(1:ng, each = nsub))
+      # D.perm = D[ivec.p,ivec.p]
+      # D.boot = D[ivec.b,ivec.b]
+      multSE.store.p[iresamp,nsub] = sqrt(MSE(data.repeat.10[ivec.p,])/nsub) 
+      multSE.store.b[iresamp,nsub] = sqrt(MSE(data.repeat.10[ivec.b,])/nsub)
+    }
+  }
+  
+  # Means and quantiles
+  means = colMeans(multSE.store.p)
+  means.b = colMeans(multSE.store.b)
+  upper = apply(multSE.store.b,MARGIN = 2,quant.upper)
+  lower = apply(multSE.store.b,MARGIN = 2,quant.lower)
+  
+  # Calculation of bias and completion of output
+  bias =  means - means.b
+  lower = lower + bias
+  upper = upper + bias
+  output = cbind(1:nmax, means, lower, upper)
+  colnames(output) <- c("n","mean", "lower.025", "upper.975")
+  return(as.data.frame(output))
+  
+} # end of MSE.d function
+```
+
+```{r}
+#The algorithm is run three times: 
+#1.Using date:transect as grouping factor and the factors date, transect and their interaction as factors in permanova
+#2.Using date as grouping factor and the factor transect as factor in permanova
+#3.Using transect as grouping factor and the factor date as factor in permanova
+
+# output.permanova.Data_Transect = MSE.d(N1, N1$Data_Transect, c('Date','fTransect','Date:fTransect'),nresamp = 100)
+# output.permanova.Data_Transect= as.data.frame(output.permanova.Data_Transect)
+# write.csv(output.permanova.Data_Transect,"./data/Feb2019/internal/precision/permanova/precision.permanova.Data_Transect.csv")
+output.permanova.Data_Transect<-read.csv("./data/internal/precision/permanova/precision.permanova.Data_Transect.csv",stringsAsFactors = FALSE)
+
+# output.permanova.Data = MSE.d(data.repeat.10=N1, group=N1$Date, factors=c('fTransect'),nresamp = 100)
+# output.permanova.Data= as.data.frame(output.permanova.Data)
+# write.csv(output.permanova.Data,"./data/Feb2019/internal/precision/permanova/precision.permanova.Data.csv")
+output.permanova.Data<-read.csv("./data/internal/precision/permanova/precision.permanova.Data.csv",stringsAsFactors = FALSE)
+
+# output.permanova.Transect = MSE.d(N1, N1$fTransect, c('Date'),nresamp = 100)
+# output.permanova.Transect= as.data.frame(output.permanova.Transect)
+# write.csv(output.permanova.Transect,"./data/Feb2019/internal/precision/permanova/precision.permanova.Transect.csv")
+output.permanova.Transect<-read.csv("./data/internal/precision/permanova/precision.permanova.Transect.csv",stringsAsFactors = FALSE)
+```
+
+```{r}
+#This function is also adopted entirely from the optimization code
+plot.precision.permanova.single<-function(data.repeat.10,group,output){
+  ng = length(levels(group))
+  n.i = table(group)
+  nmax = max(n.i) 
+  
+  plot(2:nmax, output$mean[2:nmax], type = "n", main = "",
+       ylab = "MultSE based on residual mean square", xlab = "Sample size (n)",
+       ylim = c(0,0.35), xlim = c(1,20), las=1) 
+  arrows(2:nmax, output$upper[2:nmax],
+         2:nmax, output$lower[2:nmax],
+         length = 0.02, angle = 90, code = 3, col = "black")
+  points(2:nmax, output$mean[2:nmax], pch = 21, bg = "black")
+}
+```
+
+```{r}
+#Cleaning the output from the previous three blocks and creating plots 
+plot.precision.permanova.single(N1,N1$Data_Transect,output.permanova.Data_Transect)
+plot.precision.permanova.single(N1,N1$Date,output.permanova.Data)
+plot.precision.permanova.single(N1,N1$fTransect,output.permanova.Transect)
+
+output.permanova.Data_Transect$type="Date and Transect"
+output.permanova.Data$type="Transect"
+output.permanova.Transect$type="Date"
+
+output.permanova.Data_Transect$effort=output.permanova.Data_Transect$n*25
+output.permanova.Data$effort=output.permanova.Data$n*5
+output.permanova.Transect$effort=output.permanova.Transect$n*5
+
+output.permanova<-rbind(output.permanova.Data_Transect,
+                        output.permanova.Data,
+                        output.permanova.Transect)
+output.permanova<-output.permanova[which(output.permanova$n!=1),]
+xmax=20
+ymax=0.3
+
+g<-ggplot(data = output.permanova,aes(x=n,y=mean,group=type))
+g<-g+geom_line(aes(colour=type),size=1)+geom_point()
+g<-g+xlab("Number of repeats")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.permanova,aes(x=n,ymin=lower.025,ymax=upper.975,fill=type,colour=type),alpha=0.2)+
+    theme(
+                           #legend.position="centre",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax/10, y=ymax-ymax/10, label= "(A)" ,size=4,family="serif")
+g
+
+xmax=100
+g<-ggplot(data = output.permanova,aes(x=effort,y=mean,group=type))
+g<-g+geom_line(aes(colour=type),size=1)+geom_point()
+g<-g+xlab("Effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.permanova,aes(x=effort,ymin=lower.025,ymax=upper.975,fill=type,colour=type),alpha=0.2)+
+    theme(
+                           #legend.position="centre",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax/10, y=ymax-ymax/10, label= "(A)" ,size=4,family="serif")
+g
+```
+
+Datasets precision:
+advanced_transect: Transect as fixed effect, date as part of the repeats
+advanced_transect_date: Transects as fixed effects, data as strata
+advanced_transect_date_allrandom: Transects and strata as random factors
+advanced_transect_date_allrandom_only_bootstrap: Transects and strata as random factors, only bootstraps and extra simulations
+
+```{r eval=FALSE}
+start_time <- Sys.time()
+#Multivariate precision function based on residuals PERMANOVA advanced Transect: Here we used transects as fixed effect and date as part of the repeats
+  MSE = function(data.repeat.10) {
+    type="adonis"
+    perm.species.amount=Personal_PERMANOVA(data.repeat=data.repeat.10,factors=factors,response='fish.dist',algo='+',type=type,transform="4root")
+    if (type=="adonis"){
+      perm.species.amount=perm.species.amount$aov.tab
+      MSE=perm.species.amount$SumsOfSqs[length(perm.species.amount$SumsOfSqs)-1]/perm.species.amount$Df[length(perm.species.amount$Df)-1]
+    }
+    if (type=="adonis2"){
+      MSE=perm.species.amount$SumOfSqs[length(perm.species.amount$SumOfSqs)-1]/perm.species.amount$Df[length(perm.species.amount$Df)-1]
+    }
+    return(MSE)
+  }
+
+
+  factors=c("fTransect")
+  data.repeat.10=N1
+  nresamp = 30
+
+  # Resampling loop for each sample size.
+no_cores <- detectCores()
+cl <- makeCluster(2)
+registerDoParallel(cl)
+
+foreach (date_nsub = 2:5,.packages = "vegan") %dopar%
+{
+  for (date_iresamp in 1:nresamp) {
+    date_sample=sample(levels(data.repeat.10$fDate),date_nsub,replace=FALSE)
+    date_sample.b=sample(levels(data.repeat.10$fDate),date_nsub,replace=TRUE)
+    x=data.repeat.10[which(data.repeat.10$fDate %in% date_sample),]
+    for (k in 1:date_nsub){ #Another problem I just thought of involves the fact that initially there was no bootstrap for days, only permutations. This may give a wrong impression. I solved this here:
+      if (k==1){x.b=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b$boot=k
+      }
+      if (k>1){x.b.temp=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b.temp$boot=k
+      x.b=rbind(x.b,x.b.temp)
+      }
+    }
+    x.b$Data_Transect=paste(x.b$Data_Transect,x.b$boot,sep=" ")
+    x.b$fDate=as.factor(paste(x.b$Date,x.b$boot))
+    x.b$Date=paste(x.b$Date,x.b$boot)
+    x.b$boot<-NULL
+    multSE.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+    multSE.store.b = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+    for (nsub in 1:4) {
+      for (iresamp in 1:nresamp) {
+        ivec.p = sample(which(x$Data_Transect==unique(x$Data_Transect)[1]), size = nsub, replace = FALSE) #Mistake I made was to use x$Transect instead of x$Data_Transect. This caused only 1 sample to be selected per transect although it might have been that we included multiple dates. By using Data_Transect instead we force the algorithm to select one sample per day and transect.
+        ivec.b = sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[1]), size = nsub, replace = TRUE)
+        for (i in 2:length(unique(x$Data_Transect))) {
+          ivec.p = c(ivec.p,sample(which(x$Data_Transect==unique(x$Data_Transect)[i]), size = nsub, replace = FALSE))
+          ivec.b = c(ivec.b,sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[i]), size = nsub, replace = TRUE))
+        }
+        MSE.broad.output.p=MSE.broad(x[ivec.p,])
+        MSE.broad.output.b=MSE.broad(x.b[ivec.b,])
+        multSE.store.p[iresamp,nsub] = sqrt(MSE.broad.output.p[1]/(nsub)) #Another mistake I made was to use nsub here alone. However it should be used together with date_nsub (see earlier mistake).
+        multSE.store.b[iresamp,nsub] = sqrt(MSE.broad.output.b[1]/(nsub))
+      }
+    }
+    multSE.store.p<-as.data.frame(multSE.store.p)
+    multSE.store.b<-as.data.frame(multSE.store.b)
+    multSE.store.p$date_nsub=date_nsub
+    multSE.store.p$date_iresamp=date_iresamp
+    multSE.store.p$type="permutation"
+    multSE.store.b$date_nsub=date_nsub
+    multSE.store.b$date_iresamp=date_iresamp
+    multSE.store.b$type="bootstrap"
+    multSE.store.p$var="residual"
+    multSE.store.b$var="residual"
+
+    if (date_iresamp==1){
+        multSE.store.p.combo=multSE.store.p
+        multSE.store.b.combo=multSE.store.b
+    } else {
+        multSE.store.p.combo=rbind(multSE.store.p.combo,multSE.store.p)
+        multSE.store.b.combo=rbind(multSE.store.b.combo,multSE.store.b)
+    }
+  }
+  filerp=paste("./data/Feb2019/internal/precision/permanova/advanced_transect/",date_nsub,"_rp.csv",sep="")
+  filerb=paste("./data/Feb2019/internal/precision/permanova/advanced_transect/",date_nsub,"_rb.csv",sep="")
+  write.csv(multSE.store.p.combo,filerp)
+  write.csv(multSE.store.b.combo,filerb)
+}
+stopCluster(cl)
+end_time <- Sys.time()
+end_time - start_time
+```
+
+```{r eval=FALSE}
+start_time <- Sys.time()
+#Multivariate precision function based on residuals PERMANOVA advanced Transect: Here we used transects as fixed effect and date as strata
+  MSE = function(data.repeat.10) {
+    type="adonis"
+    perm.species.amount=Personal_PERMANOVA(data.repeat=data.repeat.10,factors=factors,response='fish.dist',algo='+',type=type,transform="4root")
+    if (type=="adonis"){
+      perm.species.amount=perm.species.amount$aov.tab
+      MSE=perm.species.amount$SumsOfSqs[length(perm.species.amount$SumsOfSqs)-1]/perm.species.amount$Df[length(perm.species.amount$Df)-1]
+    }
+    if (type=="adonis2"){
+      MSE=perm.species.amount$SumOfSqs[length(perm.species.amount$SumOfSqs)-1]/perm.species.amount$Df[length(perm.species.amount$Df)-1]
+    }
+    return(MSE)
+  }
+  MSE.broad = function(data.repeat.10) {
+    type="adonis"
+    perm.species.amount=Personal_PERMANOVA(data.repeat=data.repeat.10,factors=factors,response='fish.dist',algo='+',type=type,transform="4root")
+    if (type=="adonis"){
+      perm.species.amount=perm.species.amount$aov.tab
+      MSE=perm.species.amount$MeanSqs[length(perm.species.amount$MeanSqs)-1]
+      MSA=perm.species.amount$MeanSqs[length(perm.species.amount$MeanSqs)-2]
+    }
+    return(c(MSE,MSA))
+  }
+
+
+  factors=c("fTransect","Date")
+  data.repeat.10=N1
+  nresamp = 30
+
+  # Resampling loop for each sample size.
+no_cores <- detectCores()
+cl <- makeCluster(2)
+registerDoParallel(cl)
+
+foreach (date_nsub = 2:5,.packages = "vegan") %dopar%
+{
+  for (date_iresamp in 1:nresamp) {
+    date_sample=sample(levels(data.repeat.10$fDate),date_nsub,replace=FALSE)
+    date_sample.b=sample(levels(data.repeat.10$fDate),date_nsub,replace=TRUE)
+    x=data.repeat.10[which(data.repeat.10$fDate %in% date_sample),]
+    for (k in 1:date_nsub){ #Another problem I just thought of involves the fact that initially there was no bootstrap for days, only permutations. This may give a wrong impression. I solved this here:
+      if (k==1){x.b=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b$boot=k
+      }
+      if (k>1){x.b.temp=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b.temp$boot=k
+      x.b=rbind(x.b,x.b.temp)
+      }
+    }
+    x.b$Data_Transect=paste(x.b$Data_Transect,x.b$boot,sep=" ")
+    x.b$fDate=as.factor(paste(x.b$Date,x.b$boot))
+    x.b$Date=paste(x.b$Date,x.b$boot)
+    x.b$boot<-NULL
+    multSE.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+    multSE.store.b = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+    multSA.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+    multSA.store.b = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+    for (nsub in 1:4) {
+      for (iresamp in 1:nresamp) {
+        ivec.p = sample(which(x$Data_Transect==unique(x$Data_Transect)[1]), size = nsub, replace = FALSE) #Mistake I made was to use x$Transect instead of x$Data_Transect. This caused only 1 sample to be selected per transect although it might have been that we included multiple dates. By using Data_Transect instead we force the algorithm to select one sample per day and transect.
+        ivec.b = sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[1]), size = nsub, replace = TRUE)
+        for (i in 2:length(unique(x$Data_Transect))) {
+          ivec.p = c(ivec.p,sample(which(x$Data_Transect==unique(x$Data_Transect)[i]), size = nsub, replace = FALSE))
+          ivec.b = c(ivec.b,sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[i]), size = nsub, replace = TRUE))
+        }
+        MSE.broad.output.p=MSE.broad(x[ivec.p,])
+        MSE.broad.output.b=MSE.broad(x.b[ivec.b,])
+        multSE.store.p[iresamp,nsub] = sqrt(MSE.broad.output.p[1]/(nsub)) #Another mistake I made was to use nsub here alone. However it should be used together with date_nsub (see earlier mistake).
+        multSE.store.b[iresamp,nsub] = sqrt(MSE.broad.output.b[1]/(nsub))
+        multSA.store.p[iresamp,nsub] = sqrt((MSE.broad.output.p[2]-MSE.broad.output.p[1])/(length(unique(x$fTransect))*nsub))
+        multSA.store.b[iresamp,nsub] = sqrt((MSE.broad.output.b[2]-MSE.broad.output.b[1])/(length(unique(x.b$fTransect))*nsub))
+      }
+    }
+    multSE.store.p<-as.data.frame(multSE.store.p)
+    multSE.store.b<-as.data.frame(multSE.store.b)
+    multSE.store.p$date_nsub=date_nsub
+    multSE.store.p$date_iresamp=date_iresamp
+    multSE.store.p$type="permutation"
+    multSE.store.b$date_nsub=date_nsub
+    multSE.store.b$date_iresamp=date_iresamp
+    multSE.store.b$type="bootstrap"
+    multSE.store.p$var="residual"
+    multSE.store.b$var="residual"
+
+    multSA.store.p<-as.data.frame(multSA.store.p)
+    multSA.store.b<-as.data.frame(multSA.store.b)
+    multSA.store.p$date_nsub=date_nsub
+    multSA.store.p$date_iresamp=date_iresamp
+    multSA.store.p$type="permutation"
+    multSA.store.b$date_nsub=date_nsub
+    multSA.store.b$date_iresamp=date_iresamp
+    multSA.store.b$type="bootstrap"
+    multSA.store.p$var="days"
+    multSA.store.b$var="days"
+
+    if (date_iresamp==1){
+        multSE.store.p.combo=multSE.store.p
+        multSE.store.b.combo=multSE.store.b
+        multSA.store.p.combo=multSA.store.p
+        multSA.store.b.combo=multSA.store.b
+    } else {
+        multSE.store.p.combo=rbind(multSE.store.p.combo,multSE.store.p)
+        multSE.store.b.combo=rbind(multSE.store.b.combo,multSE.store.b)
+        multSA.store.p.combo=rbind(multSA.store.p.combo,multSA.store.p)
+        multSA.store.b.combo=rbind(multSA.store.b.combo,multSA.store.b)
+    }
+  }
+  filerp=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date/",date_nsub,"_rp.csv",sep="")
+  filerb=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date/",date_nsub,"_rb.csv",sep="")
+  fileap=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date/",date_nsub,"_ap.csv",sep="")
+  fileab=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date/",date_nsub,"_ab.csv",sep="")
+  write.csv(multSE.store.p.combo,filerp)
+  write.csv(multSE.store.b.combo,filerb)
+  write.csv(multSA.store.p.combo,fileap)
+  write.csv(multSA.store.b.combo,fileab)
+}
+stopCluster(cl)
+end_time <- Sys.time()
+end_time - start_time
+```
+
+```{r eval=FALSE}
+#run with data of previous two blocks
+quant.upper = function(x) quantile(x, prob = 0.975, na.rm = TRUE)
+quant.lower = function(x) quantile(x, prob = 0.025, na.rm = TRUE)
+
+filelist<-list.files("./data/Feb2019/internal/precision/permanova/advanced_transect/")
+for (i in 1:length(filelist)){
+  filename=paste("./data/Feb2019/internal/precision/permanova/advanced_transect/",filelist[i],sep="")
+  model=read.csv(filename)
+  if (ncol(model)==8){model$var="residual"}
+  if (i == 1){
+    fullmodel=model
+  }
+  if (i > 1){
+    fullmodel=rbind(fullmodel,model)
+  }
+}
+unique(fullmodel$date_nsub)
+table(fullmodel$date_nsub)
+
+
+fullmodel_average<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,var) %>%
+    dplyr::summarize(Repeat1 = mean(V1, na.rm = TRUE),Repeat2 = mean(V2, na.rm = TRUE),Repeat3 = mean(V3, na.rm = TRUE),Repeat4 = mean(V4, na.rm = TRUE))
+
+fullmodel_CI<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,var) %>%
+    dplyr::summarize(upper1=quant.upper(V1),upper2=quant.upper(V2),upper3=quant.upper(V3),upper4=quant.upper(V4),
+                     lower1=quant.lower(V1),lower2=quant.lower(V2),lower3=quant.lower(V3),lower4=quant.lower(V4))
+
+fullmodel_average=fullmodel_average[which(fullmodel_average$var=="residual"),]
+fullmodel_CI=fullmodel_CI[which(fullmodel_CI$var=="residual"),]
+
+  means=fullmodel_average[which(fullmodel_average$type=="permutation"),]
+  means.b=fullmodel_average[which(fullmodel_average$type=="bootstrap"),]
+  upper=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("upper1","upper2","upper3","upper4")]
+  lower=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("lower1","lower2","lower3","lower4")]
+
+  bias =  means[,c("Repeat1","Repeat2","Repeat3","Repeat4")] - means.b[,c("Repeat1","Repeat2","Repeat3","Repeat4")]
+  lower = lower+bias
+  upper = upper+bias
+  means=as.data.frame(means)
+  output = cbind(means, lower, upper)
+  output$type<-NULL
+
+  output1=output[,c("date_nsub","Repeat1","lower1","upper1")]
+  output1$n=1
+  output2=output[,c("date_nsub","Repeat2","lower2","upper2")]
+  output2$n=2
+  output3=output[,c("date_nsub","Repeat3","lower3","upper3")]
+  output3$n=3
+  output4=output[,c("date_nsub","Repeat4","lower4","upper4")]
+  output4$n=4
+  colnames(output1)[2]="Repeat"
+  colnames(output1)[3]="lower"
+  colnames(output1)[4]="upper"
+  colnames(output2)[2]="Repeat"
+  colnames(output2)[3]="lower"
+  colnames(output2)[4]="upper"
+  colnames(output3)[2]="Repeat"
+  colnames(output3)[3]="lower"
+  colnames(output3)[4]="upper"
+  colnames(output4)[2]="Repeat"
+  colnames(output4)[3]="lower"
+  colnames(output4)[4]="upper"
+  output.rbind<-rbind(output1,output2,output3,output4)
+  output.rbind$effort=output.rbind$date_nsub*output.rbind$n
+  plot(output.rbind$effort,output.rbind$Repeat)
+  output.rbind$fdate_nsub=as.factor(output.rbind$date_nsub)
+  output.rbind$fn=as.factor(output.rbind$n)
+  output.rbind=output.rbind[-1,]
+  output.rbind$Days=as.factor(output.rbind$date_nsub)
+  output.rbind$Repeats=as.factor(output.rbind$n)
+
+xmax=4.1
+ymax=0.22
+
+g<-ggplot(data = output.rbind,aes(x=n,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Repeats")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=n,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(A)" ,size=4,family="serif")
+a=g
+a
+
+xmax=20.1
+ymax=0.22
+
+g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(B)" ,size=4,family="serif")
+b=g
+b
+
+MSE_permanova_precisionN<-ggarrange(a,b, ncol=2, nrow=1, common.legend = TRUE, legend="top")
+ggsave("./figures/Feb2019/MSE_permanova_precisionN_nostrata.pdf",width = 6,height=3,plot=MSE_permanova_precisionN)
+dev.off()
+
+quant.upper = function(x) quantile(x, prob = 0.975, na.rm = TRUE)
+quant.lower = function(x) quantile(x, prob = 0.025, na.rm = TRUE)
+
+filelist<-list.files("./data/Feb2019/internal/precision/permanova/advanced_transect_date/")
+for (i in 1:length(filelist)){
+  filename=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date/",filelist[i],sep="")
+  model=read.csv(filename)
+  if (ncol(model)==8){model$var="residual"}
+  if (i == 1){
+    fullmodel=model
+  }
+  if (i > 1){
+    fullmodel=rbind(fullmodel,model)
+  }
+}
+unique(fullmodel$date_nsub)
+table(fullmodel$date_nsub)
+
+
+fullmodel_average<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,var) %>%
+    dplyr::summarize(Repeat1 = mean(V1, na.rm = TRUE),Repeat2 = mean(V2, na.rm = TRUE),Repeat3 = mean(V3, na.rm = TRUE),Repeat4 = mean(V4, na.rm = TRUE))
+
+fullmodel_CI<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,var) %>%
+    dplyr::summarize(upper1=quant.upper(V1),upper2=quant.upper(V2),upper3=quant.upper(V3),upper4=quant.upper(V4),
+                     lower1=quant.lower(V1),lower2=quant.lower(V2),lower3=quant.lower(V3),lower4=quant.lower(V4))
+
+fullmodel_average_SA=fullmodel_average[which(fullmodel_average$var=="days"),]
+fullmodel_CI_SA=fullmodel_CI[which(fullmodel_CI$var=="days"),]
+fullmodel_average=fullmodel_average[which(fullmodel_average$var=="residual"),]
+fullmodel_CI=fullmodel_CI[which(fullmodel_CI$var=="residual"),]
+
+create_output<-function(fullmodel_average,fullmodel_CI){
+
+  means=fullmodel_average[which(fullmodel_average$type=="permutation"),]
+  means.b=fullmodel_average[which(fullmodel_average$type=="bootstrap"),]
+  upper=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("upper1","upper2","upper3","upper4")]
+  lower=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("lower1","lower2","lower3","lower4")]
+
+  bias =  means[,c("Repeat1","Repeat2","Repeat3","Repeat4")] - means.b[,c("Repeat1","Repeat2","Repeat3","Repeat4")]
+  lower = lower+bias
+  upper = upper+bias
+  means=as.data.frame(means)
+  output = cbind(means, lower, upper)
+  output$type<-NULL
+
+  output1=output[,c("date_nsub","Repeat1","lower1","upper1")]
+  output1$n=1
+  output2=output[,c("date_nsub","Repeat2","lower2","upper2")]
+  output2$n=2
+  output3=output[,c("date_nsub","Repeat3","lower3","upper3")]
+  output3$n=3
+  output4=output[,c("date_nsub","Repeat4","lower4","upper4")]
+  output4$n=4
+  colnames(output1)[2]="Repeat"
+  colnames(output1)[3]="lower"
+  colnames(output1)[4]="upper"
+  colnames(output2)[2]="Repeat"
+  colnames(output2)[3]="lower"
+  colnames(output2)[4]="upper"
+  colnames(output3)[2]="Repeat"
+  colnames(output3)[3]="lower"
+  colnames(output3)[4]="upper"
+  colnames(output4)[2]="Repeat"
+  colnames(output4)[3]="lower"
+  colnames(output4)[4]="upper"
+  output.rbind<-rbind(output1,output2,output3,output4)
+  output.rbind$effort=output.rbind$date_nsub*output.rbind$n
+  plot(output.rbind$effort,output.rbind$Repeat)
+  output.rbind$fdate_nsub=as.factor(output.rbind$date_nsub)
+  output.rbind$fn=as.factor(output.rbind$n)
+  #output.rbind=output.rbind[-1,]
+  output.rbind$Days=as.factor(output.rbind$date_nsub)
+  output.rbind$Repeats=as.factor(output.rbind$n)
+  return(output.rbind)
+}
+
+output.rbind=create_output(fullmodel_average,fullmodel_CI)
+output.rbind_SA=create_output(fullmodel_average_SA,fullmodel_CI_SA)
+
+output.rbind_SA$Repeat=output.rbind_SA$Repeat/sqrt(output.rbind_SA$date_nsub)
+output.rbind_SA$upper=output.rbind_SA$upper/sqrt(output.rbind_SA$date_nsub)
+output.rbind_SA$lower=output.rbind_SA$lower/sqrt(output.rbind_SA$date_nsub)
+
+xmax=4.1
+ymax=0.15
+
+g<-ggplot(data = output.rbind_SA,aes(x=n,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Repeats")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind_SA,aes(x=n,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)
+g<-g+theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(C)" ,size=4,family="serif")
+e=g
+e
+
+xmax=20.1
+ymax=0.15
+
+g<-ggplot(data = output.rbind_SA,aes(x=effort,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Sampling effort")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind_SA,aes(x=effort,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)
+g<-g+theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+f=g
+f
+
+xmax=4.1
+ymax=0.35
+
+g<-ggplot(data = output.rbind,aes(x=n,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Repeats")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=n,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(A)" ,size=4,family="serif")
+c=g
+c
+
+xmax=20.1
+ymax=0.30
+
+g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(B)" ,size=4,family="serif")
+d=g
+d
+
+# g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Repeats))
+# g<-g+geom_line(aes(colour=Repeats),size=0.5)+geom_point(aes(colour=Repeats))
+# g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+# g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Repeats,colour=Repeats),alpha=0.2,size=0.1)+
+#     theme(
+#                            #legend.position="centre",
+#                            legend.title=element_text(size=10), legend.text=element_text(size=10),
+#                            legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+#                            legend.position=c(0.80, 0.7),
+#                            #panel.grid.major = element_blank(),
+#                            axis.line = element_line(colour = "black"),
+#                            text=element_text(size=8,  family="serif"),
+#                            panel.background = element_rect(fill = "white", colour = NA),
+#                            panel.grid.major = element_line(colour = "gray"),
+#                            panel.grid.minor = element_blank(),
+#                            axis.title = element_text(size = rel(1), colour = "black"),
+#                            axis.text = element_text(size = rel(1), colour = "black"),
+#                            line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+#             annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+# d=g
+# d
+
+MSE_permanova_precisionN<-ggarrange(c,d,e,f, ncol=2, nrow=2, common.legend = TRUE, legend="top")
+ggsave("./figures/Feb2019/MSE_permanova_precisionN_strata.pdf",width = 6,height=6,plot=MSE_permanova_precisionN)
+dev.off()
+```
+
+```{r eval=FALSE} 
+start_time <- Sys.time()
+#Power analysis to detect differences between transects with days as random strata
+  quant.upper = function(x) quantile(x, prob = 0.975, na.rm = TRUE)
+  quant.lower = function(x) quantile(x, prob = 0.025, na.rm = TRUE)
+  
+  #factors=c("fTransect")
+  data.repeat.10=N1
+  nresamp = 30
+
+  # Resampling loop for each sample size.
+no_cores <- detectCores()
+cl <- makeCluster(no_cores)
+registerDoParallel(cl)
+
+foreach (date_nsub = 3:5,.packages = "vegan") %dopar%
+{
+  for (date_iresamp in 1:nresamp) {
+    date_sample=sample(levels(data.repeat.10$fDate),date_nsub,replace=FALSE)
+    date_sample.b=sample(levels(data.repeat.10$fDate),date_nsub,replace=TRUE)
+    x=data.repeat.10[which(data.repeat.10$fDate %in% date_sample),]
+    for (k in 1:date_nsub){ #Another problem I just thought of involves the fact that initially there was no bootstrap for days, only permutations. This may give a wrong impression. I solved this here:
+      if (k==1){x.b=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b$boot=k
+      }
+      if (k>1){x.b.temp=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b.temp$boot=k
+      x.b=rbind(x.b,x.b.temp)
+      }
+    }
+    x.b$Data_Transect=paste(x.b$Data_Transect,x.b$boot,sep=" ")
+    x.b$fDate=as.factor(paste(x.b$Date,x.b$boot))
+    x.b$Date=paste(x.b$Date,x.b$boot)
+    x.b$boot<-NULL
+    multSE.store.p = (matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp*10))
+    multSE.store.b = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp*10)
+    for (nsub in 2:4) {
+      for (iresamp in 1:nresamp) {
+        ivec.p = sample(which(x$Data_Transect==unique(x$Data_Transect)[1]), size = nsub, replace = FALSE) #Mistake I made was to use x$Transect instead of x$Data_Transect. This caused only 1 sample to be selected per transect although it might have been that we included multiple dates. By using Data_Transect instead we force the algorithm to select one sample per day and transect.
+        ivec.b = sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[1]), size = nsub, replace = TRUE)
+        for (i in 2:length(unique(x$Data_Transect))) {
+          ivec.p = c(ivec.p,sample(which(x$Data_Transect==unique(x$Data_Transect)[i]), size = nsub, replace = FALSE))
+          ivec.b = c(ivec.b,sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[i]), size = nsub, replace = TRUE))
+        }
+        group.resamp = factor(rep(1:length(unique(x$Data_Transect)), each = nsub))
+        permanova.p=pairwise.adonis(x[ivec.p,],factors=x$fTransect[ivec.p],strata="Date",nperm=999)
+        multSE.store.p[seq(from=1+(iresamp-1)*10,to=iresamp*10,by=1),nsub] =  permanova.p$p.adjusted
+        contrasts=permanova.p$pairs
+        multSE.store.b[seq(from=1+(iresamp-1)*10,to=iresamp*10,by=1),nsub] = pairwise.adonis(x.b[ivec.b,],factors=x.b$fTransect[ivec.b],strata="Date")$p.adjusted
+      }
+    }
+    multSE.store.p<-as.data.frame(multSE.store.p)
+    multSE.store.b<-as.data.frame(multSE.store.b)
+    multSE.store.p$date_nsub=date_nsub
+    multSE.store.p$date_iresamp=date_iresamp
+    multSE.store.p$type="permutation"
+    multSE.store.p$contrasts=contrasts
+    multSE.store.b$date_nsub=date_nsub
+    multSE.store.b$date_iresamp=date_iresamp
+    multSE.store.b$type="bootstrap"
+    multSE.store.b$contrasts=contrasts
+    if (date_iresamp==1){
+        multSE.store.p.combo=multSE.store.p
+        multSE.store.b.combo=multSE.store.b
+    } else {
+        multSE.store.p.combo=rbind(multSE.store.p.combo,multSE.store.p)
+        multSE.store.b.combo=rbind(multSE.store.b.combo,multSE.store.b)
+    }
+  }
+  filep=paste("./data/Feb2019/internal/power/permanova/advanced/",date_nsub,"_p.csv",sep="")
+  fileb=paste("./data/Feb2019/internal/power/permanova/advanced/",date_nsub,"_b.csv",sep="") 
+  write.csv(multSE.store.p.combo,filep)
+  write.csv(multSE.store.b.combo,fileb)
+}
+stopCluster(cl)
+end_time <- Sys.time()
+end_time - start_time
+```
+
+```{r}
+#Combine data of the previous block
+quant.upper = function(x) quantile(x, prob = 0.95, na.rm = TRUE)
+quant.lower = function(x) quantile(x, prob = 0.05, na.rm = TRUE)
+
+filelist<-list.files("./data/Feb2019/internal/power/permanova/advanced/")
+for (i in 1:length(filelist)){
+  filename=paste("./data/Feb2019/internal/power/permanova/advanced/",filelist[i],sep="")
+  model=read.csv(filename)
+  if (i == 1){
+    fullmodel=model
+  }
+  if (i > 1){
+    fullmodel=rbind(fullmodel,model)
+  }
+}
+unique(fullmodel$date_nsub)
+table(fullmodel$date_nsub)
+
+
+# fullmodel_average<-fullmodel %>%
+#     dplyr::group_by(date_nsub,type,contrasts) %>%
+#     dplyr::summarize(Repeat1 = mean(V1, na.rm = TRUE),Repeat2 = mean(V2, na.rm = TRUE),Repeat3 = mean(V3, na.rm = TRUE),Repeat4 = mean(V4, na.rm = TRUE))
+
+fullmodel_average<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,contrasts) %>%
+    dplyr::summarize(n_group = n(),Repeat1_abs=sum(V1 > 0.05,na.rm=TRUE),Repeat1=Repeat1_abs/n_group,
+                     Repeat2_abs=sum(V2 > 0.05,na.rm=FALSE),Repeat2=Repeat2_abs/n_group,
+                     Repeat3_abs=sum(V3 > 0.05,na.rm=FALSE),Repeat3=Repeat3_abs/n_group,
+                     Repeat4_abs=sum(V4 > 0.05,na.rm=FALSE),Repeat4=Repeat4_abs/n_group)
+
+fullmodel_average=fullmodel_average[,c("date_nsub","type","contrasts","Repeat1","Repeat2","Repeat3","Repeat4")]
+fullmodel_average$Repeat1=NA
+
+fullmodel_CI<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,contrasts) %>%
+    dplyr::summarize(upper1=quant.upper(V1),upper2=quant.upper(V2),upper3=quant.upper(V3),upper4=quant.upper(V4),
+                     lower1=quant.lower(V1),lower2=quant.lower(V2),lower3=quant.lower(V3),lower4=quant.lower(V4))
+
+means=fullmodel_average[which(fullmodel_average$type=="bootstrap"),]
+means.b=fullmodel_average[which(fullmodel_average$type=="bootstrap"),]
+upper=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("upper1","upper2","upper3","upper4")]
+lower=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("lower1","lower2","lower3","lower4")]
+
+means=as.data.frame(means)
+output = cbind(means, lower, upper)
+output$type<-NULL
+
+output1=output[,c("date_nsub","Repeat1","lower1","upper1","contrasts")]
+output1$n=1
+output2=output[,c("date_nsub","Repeat2","lower2","upper2","contrasts")]
+output2$n=2
+output3=output[,c("date_nsub","Repeat3","lower3","upper3","contrasts")]
+output3$n=3
+output4=output[,c("date_nsub","Repeat4","lower4","upper4","contrasts")]
+output4$n=4
+colnames(output1)[2]="Repeat"
+colnames(output1)[3]="lower"
+colnames(output1)[4]="upper"
+colnames(output1)[5]="contrasts"
+colnames(output2)[2]="Repeat"
+colnames(output2)[3]="lower"
+colnames(output2)[4]="upper"
+colnames(output2)[5]="contrasts"
+colnames(output3)[2]="Repeat"
+colnames(output3)[3]="lower"
+colnames(output3)[4]="upper"
+colnames(output3)[5]="contrasts"
+colnames(output4)[2]="Repeat"
+colnames(output4)[3]="lower"
+colnames(output4)[4]="upper"
+colnames(output4)[5]="contrasts"
+output.rbind<-rbind(output1,output2,output3,output4)
+output.rbind$effort=output.rbind$date_nsub*output.rbind$n
+plot(output.rbind$effort,output.rbind$Repeat)
+output.rbind$fdate_nsub=as.factor(output.rbind$date_nsub)
+output.rbind$fn=as.factor(output.rbind$n)
+output.rbind=output.rbind[-1,]
+output.rbind$Days=as.factor(output.rbind$date_nsub)
+output.rbind$Repeats=as.factor(output.rbind$n)
+
+output.rbind$Repeat<-1-output.rbind$Repeat
+output.rbind$lower<-1-output.rbind$lower
+output.rbind$upper<-1-output.rbind$upper
+
+
+xmax=21
+ymax=1
+
+g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=contrasts))
+g<-g+geom_line(aes(colour=contrasts),size=0.5)+geom_point(aes(colour=contrasts))
+g<-g+xlab("Sampling effort")+ylab("Power PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+#g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=contrasts,colour=contrasts),alpha=0.2,size=0.1)
+g<-g+theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.1, 0.5),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))
+c=g
+c
+
+permpws_strata<-pairwise.adonis(N1,factors=N1$fTransect,strata="Date")
+colnames(permpws_strata)[1]="contrasts"
+output.rbind=merge(permpws_strata[,c("contrasts","R2")],output.rbind,by="contrasts")
+output.rbind.without<-output.rbind[-which(output.rbind$contrasts==unique(output.rbind$contrasts)[10]),]
+
+#y=output.rbind.without[-which(is.na(output.rbind.without$Repeat)==TRUE),]
+#model.power=lmer((Repeat)~date_nsub+n+(1|contrasts),data=output.rbind)
+model.power=glm(Repeat~date_nsub+n,data=output.rbind.without,family=binomial(link=logit))
+exp(cbind(OR = coef(model.power), confint(model.power)))
+#model.power=betareg((Repeat)~date_nsub+n+R2,data=y)
+summary(model.power)
+plot(model.power)
+# r.squaredGLMM(model.power)
+# residuals(model.power)
+# res=simulateResiduals(model.power)
+# plot(res)
+# 
+# model.power.gam=gamm(Repeat~date_nsub+n,random=list(contrasts=~1),data=output.rbind)
+# model.power.gam=gam(Repeat~date_nsub+n+R2,data=output.rbind)
+# summary(model.power.gam$gam)
+# summary(model.power.gam$lme)
+
+#MSE_permanova_powernN<-ggarrange(c, ncol=1, nrow=1, legend="bottom")
+ggsave("./figures/Feb2019/MSE_permanova_powerN.pdf",width = 5,height=3,plot=c)
+dev.off()
+```
+
+```{r eval=FALSE}
+# #Multivariate precision function based on residuals PERMANOVA advanced Transect: Here we used transects as fixed effect and consider days as a random effect: only bootstrap was used here to simulate more observations than there actually were
+# start_time <- Sys.time()
+#   MSE = function(data.repeat.10) {
+#     type="adonis"
+#     perm.species.amount=Personal_PERMANOVA(data.repeat=data.repeat.10,factors=factors,response='fish.dist',algo='+',type=type,transform="4root")
+#     if (type=="adonis"){
+#       perm.species.amount=perm.species.amount$aov.tab
+#       MSE=perm.species.amount$SumsOfSqs[length(perm.species.amount$SumsOfSqs)-1]/perm.species.amount$Df[length(perm.species.amount$Df)-1]
+#     }
+#     if (type=="adonis2"){
+#       MSE=perm.species.amount$SumOfSqs[length(perm.species.amount$SumOfSqs)-1]/perm.species.amount$Df[length(perm.species.amount$Df)-1]
+#     }
+#     return(MSE)
+#   }
+#   MSE.broad = function(data.repeat.10) {
+#     type="adonis"
+#     perm.species.amount=Personal_PERMANOVA(data.repeat=data.repeat.10,factors=factors,response='fish.dist',algo='+',type=type,transform="4root")
+#     if (type=="adonis"){
+#       perm.species.amount=perm.species.amount$aov.tab
+#       MSE=perm.species.amount$MeanSqs[length(perm.species.amount$MeanSqs)-1]
+#       MSA=perm.species.amount$MeanSqs[length(perm.species.amount$MeanSqs)-2]
+#     }
+#     return(c(MSE,MSA))
+#   }
+#   
+#   
+#   factors=c("fTransect","Date")
+#   data.repeat.10=N1
+#   nresamp = 30
+# 
+#   # Resampling loop for each sample size.
+# no_cores <- detectCores()
+# cl <- makeCluster(4)
+# registerDoParallel(cl)
+# 
+# foreach (date_nsub = 2:15,.packages = "vegan") %dopar%
+# {
+#   for (date_iresamp in 1:nresamp) {
+#     #date_sample=sample(levels(data.repeat.10$fDate),date_nsub,replace=FALSE)
+#     date_sample.b=sample(levels(data.repeat.10$fDate),date_nsub,replace=TRUE)
+#     #x=data.repeat.10[which(data.repeat.10$fDate %in% date_sample),]
+#     for (k in 1:date_nsub){ #Another problem I just thought of involves the fact that initially there was no bootstrap for days, only permutations. This may give a wrong impression. I solved this here:
+#       if (k==1){x.b=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+#       x.b$boot=k
+#       }
+#       if (k>1){x.b.temp=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+#       x.b.temp$boot=k
+#       x.b=rbind(x.b,x.b.temp)
+#       }
+#     }
+#     x.b$Data_Transect=paste(x.b$Data_Transect,x.b$boot,sep=" ")
+#     x.b$fDate=as.factor(paste(x.b$Date,x.b$boot))
+#     x.b$Date=paste(x.b$Date,x.b$boot)
+#     x.b$boot<-NULL
+#     #multSE.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+#     multSE.store.b = matrix(rep(NA,nresamp*12), ncol = 12, nrow = nresamp)
+#     #multSA.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+#     multSA.store.b = matrix(rep(NA,nresamp*12), ncol = 12, nrow = nresamp)
+#     for (nsub in 1:12) {
+#       for (iresamp in 1:nresamp) {
+#         #ivec.p = sample(which(x$Data_Transect==unique(x$Data_Transect)[1]), size = nsub, replace = FALSE) #Mistake I made was to use x$Transect instead of x$Data_Transect. This caused only 1 sample to be selected per transect although it might have been that we included multiple dates. By using Data_Transect instead we force the algorithm to select one sample per day and transect.
+#         ivec.b = sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[1]), size = nsub, replace = TRUE)
+#         for (i in 2:length(unique(x$Data_Transect))) {
+#           #ivec.p = c(ivec.p,sample(which(x$Data_Transect==unique(x$Data_Transect)[i]), size = nsub, replace = FALSE))
+#           ivec.b = c(ivec.b,sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[i]), size = nsub, replace = TRUE))
+#         }
+#         #MSE.broad.output.p=MSE.broad(x[ivec.p,])
+#         MSE.broad.output.b=MSE.broad(x.b[ivec.b,])
+#         #multSE.store.p[iresamp,nsub] = sqrt(MSE.broad.output.p[1]/(nsub)) #Another mistake I made was to use nsub here alone. However it should be used together with date_nsub (see earlier mistake). 
+#         multSE.store.b[iresamp,nsub] = sqrt(MSE.broad.output.b[1]/(nsub))
+#         #multSA.store.p[iresamp,nsub] = sqrt(MSE.broad.output.p[2]-MSE.broad.output.p[1])/(length(unique(x$fTransect))*nsub)
+#         multSA.store.b[iresamp,nsub] = sqrt(MSE.broad.output.b[2]-MSE.broad.output.b[1])/(length(unique(x.b$fTransect))*nsub)
+#       }
+#     }
+#     #multSE.store.p<-as.data.frame(multSE.store.p)
+#     multSE.store.b<-as.data.frame(multSE.store.b)
+#     # multSE.store.p$date_nsub=date_nsub
+#     # multSE.store.p$date_iresamp=date_iresamp
+#     # multSE.store.p$type="permutation"
+#     multSE.store.b$date_nsub=date_nsub
+#     multSE.store.b$date_iresamp=date_iresamp
+#     multSE.store.b$type="bootstrap"
+#     #multSE.store.p$var="residual"
+#     multSE.store.b$var="residual"
+#     
+#     #multSA.store.p<-as.data.frame(multSA.store.p)
+#     multSA.store.b<-as.data.frame(multSA.store.b)
+#     #multSA.store.p$date_nsub=date_nsub
+#     # multSA.store.p$date_iresamp=date_iresamp
+#     # multSA.store.p$type="permutation"
+#     multSA.store.b$date_nsub=date_nsub
+#     multSA.store.b$date_iresamp=date_iresamp
+#     multSA.store.b$type="bootstrap"
+#     #multSA.store.p$var="days"
+#     multSA.store.b$var="days"
+#     
+#     if (date_iresamp==1){
+#         #multSE.store.p.combo=multSE.store.p
+#         multSE.store.b.combo=multSE.store.b
+#         #multSA.store.p.combo=multSA.store.p
+#         multSA.store.b.combo=multSA.store.b
+#     } else {
+#         #multSE.store.p.combo=rbind(multSE.store.p.combo,multSE.store.p)
+#         multSE.store.b.combo=rbind(multSE.store.b.combo,multSE.store.b)
+#         #multSA.store.p.combo=rbind(multSA.store.p.combo,multSA.store.p)
+#         multSA.store.b.combo=rbind(multSA.store.b.combo,multSA.store.b)
+#     }
+#   }
+#   #filerp=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date/",date_nsub,"_rp.csv",sep="")
+#   filerb=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_only_bootstrap/",date_nsub,"_rb.csv",sep="")
+#   #fileap=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date/",date_nsub,"_ap.csv",sep="")
+#   fileab=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_only_bootstrap/",date_nsub,"_ab.csv",sep="")
+#   #write.csv(multSE.store.p.combo,filerp)
+#   write.csv(multSE.store.b.combo,filerb)
+#   #write.csv(multSA.store.p.combo,fileap)
+#   write.csv(multSA.store.b.combo,fileab)
+# }
+# stopCluster(cl)
+# end_time <- Sys.time()
+# end_time - start_time
+```
+
+```{r}
+#Combine data of the previous block
+# quant.upper = function(x) quantile(x, prob = 0.975, na.rm = TRUE)
+# quant.lower = function(x) quantile(x, prob = 0.025, na.rm = TRUE)
+# 
+# filelist<-list.files("./data/Feb2019/internal/precision/permanova/advanced_transect_date_only_bootstrap/")
+# for (i in 1:length(filelist)){
+#   filename=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_only_bootstrap/",filelist[i],sep="")
+#   model=read.csv(filename)
+#   if (ncol(model)==8){model$var="residual"}
+#   if (i == 1){
+#     fullmodel=model
+#   }
+#   if (i > 1){
+#     fullmodel=rbind(fullmodel,model)
+#   }
+# }
+# unique(fullmodel$date_nsub)
+# table(fullmodel$date_nsub)
+# 
+# 
+# fullmodel_average<-fullmodel %>%
+#     dplyr::group_by(date_nsub,type,var) %>%
+#     dplyr::summarize(Repeat1 = mean(V1, na.rm = TRUE),Repeat2 = mean(V2, na.rm = TRUE),Repeat3 = mean(V3, na.rm = TRUE),Repeat4 = mean(V4, na.rm = TRUE),Repeat5 = mean(V5, na.rm = TRUE),Repeat6 = mean(V6, na.rm = TRUE),Repeat7 = mean(V7, na.rm = TRUE),Repeat8 = mean(V8, na.rm = TRUE),Repeat9 = mean(V9, na.rm = TRUE),Repeat10 = mean(V10, na.rm = TRUE),Repeat11 = mean(V11, na.rm = TRUE),Repeat12 = mean(V12, na.rm = TRUE))
+# 
+# fullmodel_CI<-fullmodel %>%
+#     dplyr::group_by(date_nsub,type,var) %>%
+#     dplyr::summarize(upper1=quant.upper(V1),upper2=quant.upper(V2),upper3=quant.upper(V3),upper4=quant.upper(V4),
+#                      lower1=quant.lower(V1),lower2=quant.lower(V2),lower3=quant.lower(V3),lower4=quant.lower(V4),
+#                      upper5=quant.upper(V5),upper6=quant.upper(V6),upper7=quant.upper(V7),upper8=quant.upper(V8),
+#                      lower5=quant.lower(V5),lower6=quant.lower(V6),lower7=quant.lower(V7),lower8=quant.lower(V8),
+#                      upper9=quant.upper(V9),upper10=quant.upper(V10),upper11=quant.upper(V11),upper12=quant.upper(V12),
+#                      lower9=quant.lower(V9),lower10=quant.lower(V10),lower11=quant.lower(V11),lower12=quant.lower(V12))
+# 
+# fullmodel_average_SA=fullmodel_average[which(fullmodel_average$var=="days"),]
+# fullmodel_CI_SA=fullmodel_CI[which(fullmodel_CI$var=="days"),]
+# fullmodel_average=fullmodel_average[which(fullmodel_average$var=="residual"),]
+# fullmodel_CI=fullmodel_CI[which(fullmodel_CI$var=="residual"),]
+# 
+# create_output<-function(fullmodel_average,fullmodel_CI){
+# 
+#   means.b=fullmodel_average[which(fullmodel_average$type=="bootstrap"),]
+#   upper=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("upper1","upper2","upper3","upper4","upper5","upper6","upper7","upper8","upper9","upper10","upper11","upper12")]
+#   lower=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("lower1","lower2","lower3","lower4","lower5","lower6","lower7","lower8","lower9","lower10","lower11","lower12")]
+#   
+#   lower = lower
+#   upper = upper
+#   means=as.data.frame(means.b)
+#   output = cbind(means, lower, upper)
+#   output$type<-NULL
+#   
+#   output1=output[,c("date_nsub","Repeat1","lower1","upper1")]
+#   output1$n=1
+#   output2=output[,c("date_nsub","Repeat2","lower2","upper2")]
+#   output2$n=2
+#   output3=output[,c("date_nsub","Repeat3","lower3","upper3")]
+#   output3$n=3
+#   output4=output[,c("date_nsub","Repeat4","lower4","upper4")]
+#   output4$n=4
+#   output5=output[,c("date_nsub","Repeat5","lower5","upper5")]
+#   output5$n=5
+#   output6=output[,c("date_nsub","Repeat6","lower6","upper6")]
+#   output6$n=6
+#   output7=output[,c("date_nsub","Repeat7","lower7","upper7")]
+#   output7$n=7
+#   output8=output[,c("date_nsub","Repeat8","lower8","upper8")]
+#   output8$n=8
+#   output9=output[,c("date_nsub","Repeat9","lower9","upper9")]
+#   output9$n=9
+#   output10=output[,c("date_nsub","Repeat10","lower10","upper10")]
+#   output10$n=10
+#   output11=output[,c("date_nsub","Repeat11","lower11","upper11")]
+#   output11$n=11
+#   output12=output[,c("date_nsub","Repeat12","lower12","upper12")]
+#   output12$n=12
+#   colnames(output1)[2]="Repeat"
+#   colnames(output1)[3]="lower"
+#   colnames(output1)[4]="upper"
+#   colnames(output2)[2]="Repeat"
+#   colnames(output2)[3]="lower"
+#   colnames(output2)[4]="upper"
+#   colnames(output3)[2]="Repeat"
+#   colnames(output3)[3]="lower"
+#   colnames(output3)[4]="upper"
+#   colnames(output4)[2]="Repeat"
+#   colnames(output4)[3]="lower"
+#   colnames(output4)[4]="upper"
+#   colnames(output5)[2]="Repeat"
+#   colnames(output5)[3]="lower"
+#   colnames(output5)[4]="upper"
+#   colnames(output6)[2]="Repeat"
+#   colnames(output6)[3]="lower"
+#   colnames(output6)[4]="upper"
+#   colnames(output7)[2]="Repeat"
+#   colnames(output7)[3]="lower"
+#   colnames(output7)[4]="upper"
+#   colnames(output8)[2]="Repeat"
+#   colnames(output8)[3]="lower"
+#   colnames(output8)[4]="upper"
+#   colnames(output9)[2]="Repeat"
+#   colnames(output9)[3]="lower"
+#   colnames(output9)[4]="upper"
+#   colnames(output10)[2]="Repeat"
+#   colnames(output10)[3]="lower"
+#   colnames(output10)[4]="upper"
+#   colnames(output11)[2]="Repeat"
+#   colnames(output11)[3]="lower"
+#   colnames(output11)[4]="upper"
+#   colnames(output12)[2]="Repeat"
+#   colnames(output12)[3]="lower"
+#   colnames(output12)[4]="upper"
+#   output.rbind<-rbind(output1,output2,output3,output4,output5,output6,output7,output8,output9,output10,output11,output12)
+#   output.rbind$effort=output.rbind$date_nsub*output.rbind$n
+#   plot(output.rbind$effort,output.rbind$Repeat)
+#   output.rbind$fdate_nsub=as.factor(output.rbind$date_nsub)
+#   output.rbind$fn=as.factor(output.rbind$n)
+#   #output.rbind=output.rbind[-1,]
+#   output.rbind$Days=as.factor(output.rbind$date_nsub)
+#   output.rbind$Repeats=as.factor(output.rbind$n)
+#   return(output.rbind)
+# }
+# 
+# output.rbind=create_output(fullmodel_average,fullmodel_CI)
+# output.rbind_SA=create_output(fullmodel_average_SA,fullmodel_CI_SA)
+# 
+# output.rbind_SA$Repeat=output.rbind_SA$Repeat/output.rbind_SA$date_nsub
+# output.rbind_SA$upper=output.rbind_SA$upper/output.rbind_SA$date_nsub
+# output.rbind_SA$lower=output.rbind_SA$lower/output.rbind_SA$date_nsub
+# 
+# 
+# xmax=13
+# ymax=0.03
+# 
+# g<-ggplot(data = output.rbind_SA,aes(x=n,y=Repeat,group=Days))
+# g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+# g<-g+xlab("Repeats")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+# g<-g+geom_ribbon(data=output.rbind_SA,aes(x=n,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.09,colour = NA)
+# g<-g+theme(
+#                            #legend.position="none",
+#                            legend.title=element_text(size=10), legend.text=element_text(size=10),
+#                            legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+#                            legend.position=c(0.80, 0.7),
+#                            #panel.grid.major = element_blank(),
+#                            axis.line = element_line(colour = "black"),
+#                            text=element_text(size=8,  family="serif"),
+#                            panel.background = element_rect(fill = "white", colour = NA),
+#                            panel.grid.major = element_line(colour = "gray"),
+#                            panel.grid.minor = element_blank(),
+#                            axis.title = element_text(size = rel(1), colour = "black"),
+#                            axis.text = element_text(size = rel(1), colour = "black"),
+#                            line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+#             annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(C)" ,size=4,family="serif")
+# c=g
+# c
+# 
+# xmax=181
+# ymax=0.03
+# 
+# g<-ggplot(data = output.rbind_SA,aes(x=effort,y=Repeat,group=Days))
+# g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+# g<-g+xlab("Sampling effort")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+# g<-g+geom_ribbon(data=output.rbind_SA,aes(x=effort,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.09,colour = NA)
+# g<-g+theme(
+#                            #legend.position="none",
+#                            legend.title=element_text(size=10), legend.text=element_text(size=10),
+#                            legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+#                            legend.position=c(0.80, 0.7),
+#                            #panel.grid.major = element_blank(),
+#                            axis.line = element_line(colour = "black"),
+#                            text=element_text(size=8,  family="serif"),
+#                            panel.background = element_rect(fill = "white", colour = NA),
+#                            panel.grid.major = element_line(colour = "gray"),
+#                            panel.grid.minor = element_blank(),
+#                            axis.title = element_text(size = rel(1), colour = "black"),
+#                            axis.text = element_text(size = rel(1), colour = "black"),
+#                            line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+#             annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+# d=g
+# d
+# 
+# xmax=13
+# ymax=0.35
+# 
+# g<-ggplot(data = output.rbind,aes(x=n,y=Repeat,group=Days))
+# g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+# g<-g+xlab("Repeats")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+# g<-g+geom_ribbon(data=output.rbind,aes(x=n,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.09,colour = NA)+
+#     theme(
+#                            #legend.position="none",
+#                            legend.title=element_text(size=10), legend.text=element_text(size=10),
+#                            legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+#                            legend.position=c(0.80, 0.7),
+#                            #panel.grid.major = element_blank(),
+#                            axis.line = element_line(colour = "black"),
+#                            text=element_text(size=8,  family="serif"),
+#                            panel.background = element_rect(fill = "white", colour = NA),
+#                            panel.grid.major = element_line(colour = "gray"),
+#                            panel.grid.minor = element_blank(),
+#                            axis.title = element_text(size = rel(1), colour = "black"),
+#                            axis.text = element_text(size = rel(1), colour = "black"),
+#                            line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+#             annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(A)" ,size=4,family="serif")
+# a=g
+# a
+# 
+# xmax=181
+# ymax=0.30
+# 
+# g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Days))
+# g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+# g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+# g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.09,colour = NA)+
+#     theme(
+#                            #legend.position="none",
+#                            legend.title=element_text(size=10), legend.text=element_text(size=10),
+#                            legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+#                            legend.position=c(0.80, 0.7),
+#                            #panel.grid.major = element_blank(),
+#                            axis.line = element_line(colour = "black"),
+#                            text=element_text(size=8,  family="serif"),
+#                            panel.background = element_rect(fill = "white", colour = NA),
+#                            panel.grid.major = element_line(colour = "gray"),
+#                            panel.grid.minor = element_blank(),
+#                            axis.title = element_text(size = rel(1), colour = "black"),
+#                            axis.text = element_text(size = rel(1), colour = "black"),
+#                            line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+#             annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(B)" ,size=4,family="serif")
+# b=g
+# b
+# 
+# # g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Repeats))
+# # g<-g+geom_line(aes(colour=Repeats),size=0.5)+geom_point(aes(colour=Repeats))
+# # g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+# # g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Repeats,colour=Repeats),alpha=0.2,size=0.1)+
+# #     theme(
+# #                            #legend.position="centre",
+# #                            legend.title=element_text(size=10), legend.text=element_text(size=10),
+# #                            legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+# #                            legend.position=c(0.80, 0.7),
+# #                            #panel.grid.major = element_blank(),
+# #                            axis.line = element_line(colour = "black"),
+# #                            text=element_text(size=8,  family="serif"),
+# #                            panel.background = element_rect(fill = "white", colour = NA),
+# #                            panel.grid.major = element_line(colour = "gray"),
+# #                            panel.grid.minor = element_blank(),
+# #                            axis.title = element_text(size = rel(1), colour = "black"),
+# #                            axis.text = element_text(size = rel(1), colour = "black"),
+# #                            line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+# #             annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+# # d=g
+# # d
+# MSE_permanova_precisionN<-ggarrange(a,b,c,d, ncol=2, nrow=2, common.legend = TRUE, legend="top")
+# ggsave("./figures/Feb2019/MSE_permanova_precisionN_onlybootstrap.pdf",width = 6,height=6,plot=MSE_permanova_precisionN)
+# dev.off()
+```
+
+```{r eval=FALSE}
+#Multivariate precision function based on residuals PERMANOVA advanced: Here we used transects and date as random effects
+start_time <- Sys.time()
+
+  MSE.broad = function(data.repeat.10) {
+    type="adonis"
+    perm.species.amount=Personal_PERMANOVA(data.repeat=data.repeat.10,factors=factors,response='fish.dist',algo='+',type=type,transform="4root")
+    if (type=="adonis"){
+      perm.species.amount=perm.species.amount$aov.tab
+      MSE=perm.species.amount$MeanSqs[3]
+      MSA=perm.species.amount$MeanSqs[2]
+      MSF=perm.species.amount$MeanSqs[1]
+    }
+    return(c(MSE,MSA,MSF))
+  }
+  
+  
+  factors=c("fTransect","Date")
+  data.repeat.10=N1
+  nresamp = 12
+
+  # Resampling loop for each sample size.
+no_cores <- detectCores()
+cl <- makeCluster(4)
+registerDoParallel(cl)
+
+foreach (date_nsub = 2:5,.packages = "vegan") %dopar%
+{
+  for (date_iresamp in 1:nresamp) {
+    date_sample=sample(levels(data.repeat.10$fDate),date_nsub,replace=FALSE)
+    date_sample.b=sample(levels(data.repeat.10$fDate),date_nsub,replace=TRUE)
+    x=data.repeat.10[which(data.repeat.10$fDate %in% date_sample),]
+    for (k in 1:date_nsub){ #Another problem I just thought of involves the fact that initially there was no bootstrap for days, only permutations. This may give a wrong impression. I solved this here:
+      if (k==1){x.b=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b$boot=k
+      }
+      if (k>1){x.b.temp=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b.temp$boot=k
+      x.b=rbind(x.b,x.b.temp)
+      }
+    }
+    x.b$Data_Transect=paste(x.b$Data_Transect,x.b$boot,sep=" ")
+    x.b$fDate=as.factor(paste(x.b$Date,x.b$boot))
+    x.b$Date=paste(x.b$Date,x.b$boot)
+    x.b$boot<-NULL
+    for (transect_nsub in 2:5){
+      for (transect_iresamp in 1:nresamp){
+        transect_sample=sample(levels(x$fTransect),transect_nsub,replace=FALSE)
+        transect_sample.b=sample(levels(x$fTransect),transect_nsub,replace=TRUE)
+        y=x[which(x$fTransect %in% transect_sample),]
+        for (l in 1:transect_nsub){ #Another problem I just thought of involves the fact that initially there was no bootstrap for days, only permutations. This may give a wrong impression. I solved this here:
+          if (l==1){y.b=x.b[which(x.b$fTransect==transect_sample.b[l]),]
+            y.b$boot=l
+          }
+          if (l>1){y.b.temp=x.b[which(x.b$fTransect==transect_sample.b[l]),]
+            y.b.temp$boot=l
+            y.b=rbind(y.b,y.b.temp)
+          }
+        }
+        # y.b$Data_Transect=paste(y.b$Data_Transect,y.b$boot,sep=" ")
+        # y.b$fDate=as.factor(paste(y.b$Date,y.b$boot))
+        # y.b$Date=paste(y.b$Date,y.b$boot)
+        y.b$fTransect=paste(y.b$fTransect,y.b$boot)
+        y.b$boot<-NULL
+        multSE.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+        multSE.store.b = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+        multSA.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+        multSA.store.b = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+        multSF.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+        multSF.store.b = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+        for (nsub in 1:4) {
+          for (iresamp in 1:nresamp) {
+            ivec.p = sample(which(x$Data_Transect==unique(x$Data_Transect)[1]), size = nsub, replace = FALSE) #Mistake I made was to use x$Transect instead of x$Data_Transect. This caused only 1 sample to be selected per transect although it might have been that we included multiple dates. By using Data_Transect instead we force the algorithm to select one sample per day and transect.
+            ivec.b = sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[1]), size = nsub, replace = TRUE)
+            for (i in 2:length(unique(x$Data_Transect))) {
+              ivec.p = c(ivec.p,sample(which(x$Data_Transect==unique(x$Data_Transect)[i]), size = nsub, replace = FALSE))
+              ivec.b = c(ivec.b,sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[i]), size = nsub, replace = TRUE))
+            }
+            MSE.broad.output.p=MSE.broad(x[ivec.p,])
+            MSE.broad.output.b=MSE.broad(x.b[ivec.b,])
+            multSE.store.p[iresamp,nsub] = sqrt(MSE.broad.output.p[1]/(nsub)) #Another mistake I made was to use nsub here alone. However it should be used together with date_nsub (see earlier mistake). 
+            multSE.store.b[iresamp,nsub] = sqrt(MSE.broad.output.b[1]/(nsub))
+            multSA.store.p[iresamp,nsub] = sqrt((MSE.broad.output.p[2]-MSE.broad.output.p[1])/(length(unique(x$fTransect))*nsub))
+            multSA.store.b[iresamp,nsub] = sqrt((MSE.broad.output.b[2]-MSE.broad.output.b[1])/(length(unique(x.b$fTransect))*nsub))
+            multSF.store.p[iresamp,nsub] = sqrt((MSE.broad.output.p[3]-MSE.broad.output.p[1])/(length(unique(x$fDate))*nsub))
+            multSF.store.b[iresamp,nsub] = sqrt((MSE.broad.output.b[3]-MSE.broad.output.b[1])/(length(unique(x.b$fDate))*nsub))
+          }
+        }
+        multSE.store.p<-as.data.frame(multSE.store.p)
+        multSE.store.b<-as.data.frame(multSE.store.b)
+        multSE.store.p$date_nsub=date_nsub
+        multSE.store.p$transect_nsub=transect_nsub
+        multSE.store.b$transect_nsub=transect_nsub
+        multSE.store.p$date_iresamp=date_iresamp
+        multSE.store.p$type="permutation"
+        multSE.store.b$date_nsub=date_nsub
+        multSE.store.b$date_iresamp=date_iresamp
+        multSE.store.b$type="bootstrap"
+        multSE.store.p$var="residual"
+        multSE.store.b$var="residual"
+        
+        multSA.store.p<-as.data.frame(multSA.store.p)
+        multSA.store.b<-as.data.frame(multSA.store.b)
+        multSA.store.p$date_nsub=date_nsub
+        multSA.store.p$transect_nsub=transect_nsub
+        multSA.store.b$transect_nsub=transect_nsub
+        multSA.store.p$date_iresamp=date_iresamp
+        multSA.store.p$type="permutation"
+        multSA.store.b$date_nsub=date_nsub
+        multSA.store.b$date_iresamp=date_iresamp
+        multSA.store.b$type="bootstrap"
+        multSA.store.p$var="days"
+        multSA.store.b$var="days"
+        
+        multSF.store.p<-as.data.frame(multSF.store.p)
+        multSF.store.b<-as.data.frame(multSF.store.b)
+        multSF.store.p$date_nsub=date_nsub
+        multSF.store.p$transect_nsub=transect_nsub
+        multSF.store.b$transect_nsub=transect_nsub
+        multSF.store.p$date_iresamp=date_iresamp
+        multSF.store.p$type="permutation"
+        multSF.store.b$date_nsub=date_nsub
+        multSF.store.b$date_iresamp=date_iresamp
+        multSF.store.b$type="bootstrap"
+        multSF.store.p$var="transects"
+        multSF.store.b$var="transects"
+        
+        if (date_iresamp==1){
+            multSE.store.p.combo=multSE.store.p
+            multSE.store.b.combo=multSE.store.b
+            multSA.store.p.combo=multSA.store.p
+            multSA.store.b.combo=multSA.store.b
+            multSF.store.p.combo=multSF.store.p
+            multSF.store.b.combo=multSF.store.b
+        } else {
+            multSE.store.p.combo=rbind(multSE.store.p.combo,multSE.store.p)
+            multSE.store.b.combo=rbind(multSE.store.b.combo,multSE.store.b)
+            multSA.store.p.combo=rbind(multSA.store.p.combo,multSA.store.p)
+            multSA.store.b.combo=rbind(multSA.store.b.combo,multSA.store.b)
+            multSF.store.p.combo=rbind(multSA.store.p.combo,multSF.store.p)
+            multSF.store.b.combo=rbind(multSA.store.b.combo,multSF.store.b)
+        }
+      }
+      filerp=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",date_nsub,date_iresamp,transect_nsub,"_rp.csv",sep="")
+      filerb=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",date_nsub,date_iresamp,transect_nsub,"_rb.csv",sep="")
+      fileap=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",date_nsub,date_iresamp,transect_nsub,"_ap.csv",sep="")
+      fileab=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",date_nsub,date_iresamp,transect_nsub,"_ab.csv",sep="")
+      filefp=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",date_nsub,date_iresamp,transect_nsub,"_fp.csv",sep="")
+      filefb=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",date_nsub,date_iresamp,transect_nsub,"_fb.csv",sep="")
+      write.csv(multSE.store.p.combo,filerp)
+      write.csv(multSE.store.b.combo,filerb)
+      write.csv(multSA.store.p.combo,fileap)
+      write.csv(multSA.store.b.combo,fileab)
+      write.csv(multSF.store.p.combo,filefp)
+      write.csv(multSF.store.b.combo,filefb)
+    }
+  }
+}
+stopCluster(cl)
+end_time <- Sys.time()
+end_time - start_time
+```
+
+```{r}
+#Combine data of the previous block
+quant.upper = function(x) quantile(x, prob = 0.975, na.rm = TRUE)
+quant.lower = function(x) quantile(x, prob = 0.025, na.rm = TRUE)
+
+filelist<-list.files("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/")
+for (i in 1:length(filelist)){
+  filename=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",filelist[i],sep="")
+  model=read.csv(filename)
+  if (i == 1){
+    fullmodel=model
+  }
+  if (i > 1){
+    fullmodel=rbind(fullmodel,model)
+  }
+}
+unique(fullmodel$date_nsub)
+table(fullmodel$date_nsub)
+
+
+fullmodel_average<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,var) %>%
+    dplyr::summarize(Repeat1 = mean(V1, na.rm = TRUE),Repeat2 = mean(V2, na.rm = TRUE),Repeat3 = mean(V3, na.rm = TRUE),Repeat4 = mean(V4, na.rm = TRUE))
+
+fullmodel_CI<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,var) %>%
+    dplyr::summarize(upper1=quant.upper(V1),upper2=quant.upper(V2),upper3=quant.upper(V3),upper4=quant.upper(V4),
+                     lower1=quant.lower(V1),lower2=quant.lower(V2),lower3=quant.lower(V3),lower4=quant.lower(V4))
+
+fullmodel_average_SA=fullmodel_average[which(fullmodel_average$var=="days"),]
+fullmodel_CI_SA=fullmodel_CI[which(fullmodel_CI$var=="days"),]
+# fullmodel_average_SF=fullmodel_average[which(fullmodel_average$var=="transects"),]
+# fullmodel_CI_SF=fullmodel_CI[which(fullmodel_CI$var=="transects"),]
+fullmodel_average=fullmodel_average[which(fullmodel_average$var=="residual"),]
+fullmodel_CI=fullmodel_CI[which(fullmodel_CI$var=="residual"),]
+
+create_output<-function(fullmodel_average,fullmodel_CI){
+
+  means=fullmodel_average[which(fullmodel_average$type=="permutation"),]
+  means.b=fullmodel_average[which(fullmodel_average$type=="bootstrap"),]
+  upper=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("upper1","upper2","upper3","upper4")]
+  lower=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("lower1","lower2","lower3","lower4")]
+  
+  bias =  means[,c("Repeat1","Repeat2","Repeat3","Repeat4")] - means.b[,c("Repeat1","Repeat2","Repeat3","Repeat4")]
+  lower = lower+bias
+  upper = upper+bias
+  means=as.data.frame(means)
+  output = cbind(means, lower, upper)
+  output$type<-NULL
+  
+  output1=output[,c("date_nsub","Repeat1","lower1","upper1")]
+  output1$n=1
+  output2=output[,c("date_nsub","Repeat2","lower2","upper2")]
+  output2$n=2
+  output3=output[,c("date_nsub","Repeat3","lower3","upper3")]
+  output3$n=3
+  output4=output[,c("date_nsub","Repeat4","lower4","upper4")]
+  output4$n=4
+  colnames(output1)[2]="Repeat"
+  colnames(output1)[3]="lower"
+  colnames(output1)[4]="upper"
+  colnames(output2)[2]="Repeat"
+  colnames(output2)[3]="lower"
+  colnames(output2)[4]="upper"
+  colnames(output3)[2]="Repeat"
+  colnames(output3)[3]="lower"
+  colnames(output3)[4]="upper"
+  colnames(output4)[2]="Repeat"
+  colnames(output4)[3]="lower"
+  colnames(output4)[4]="upper"
+  output.rbind<-rbind(output1,output2,output3,output4)
+  output.rbind$effort=output.rbind$date_nsub*output.rbind$n
+  plot(output.rbind$effort,output.rbind$Repeat)
+  output.rbind$fdate_nsub=as.factor(output.rbind$date_nsub)
+  #output.rbind$ftransect_nsub=as.factor(output.rbind$transect_nsub)
+  output.rbind$fn=as.factor(output.rbind$n)
+  output.rbind$Days=as.factor(output.rbind$date_nsub)
+  output.rbind$Repeats=as.factor(output.rbind$n)
+  return(output.rbind)
+}
+
+output.rbind=create_output(fullmodel_average,fullmodel_CI)
+output.rbind_SA=create_output(fullmodel_average_SA,fullmodel_CI_SA)
+#output.rbind_SF=create_output(fullmodel_average_SF,fullmodel_CI_SF)
+
+output.rbind_SA$Repeat=output.rbind_SA$Repeat/sqrt(output.rbind_SA$date_nsub)
+output.rbind_SA$upper=output.rbind_SA$upper/sqrt(output.rbind_SA$date_nsub)
+output.rbind_SA$lower=output.rbind_SA$lower/sqrt(output.rbind_SA$date_nsub)
+
+xmax=4.1
+ymax=0.15
+
+g<-ggplot(data = output.rbind_SA,aes(x=n,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Repeats")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind_SA,aes(x=n,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)
+g<-g+theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(C)" ,size=4,family="serif")
+c=g
+c
+
+xmax=20.1
+ymax=0.15
+
+g<-ggplot(data = output.rbind_SA,aes(x=effort,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Sampling effort")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind_SA,aes(x=effort,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)
+g<-g+theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+d=g
+d
+
+xmax=4.1
+ymax=0.35
+
+g<-ggplot(data = output.rbind,aes(x=n,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Repeats")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=n,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(A)" ,size=4,family="serif")
+a=g
+a
+
+xmax=20.1
+ymax=0.35
+
+g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.2,size=0.1)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(B)" ,size=4,family="serif")
+b=g
+b
+
+# g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Repeats))
+# g<-g+geom_line(aes(colour=Repeats),size=0.5)+geom_point(aes(colour=Repeats))
+# g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+# g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Repeats,colour=Repeats),alpha=0.2,size=0.1)+
+#     theme(
+#                            #legend.position="centre",
+#                            legend.title=element_text(size=10), legend.text=element_text(size=10),
+#                            legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+#                            legend.position=c(0.80, 0.7),
+#                            #panel.grid.major = element_blank(),
+#                            axis.line = element_line(colour = "black"),
+#                            text=element_text(size=8,  family="serif"),
+#                            panel.background = element_rect(fill = "white", colour = NA),
+#                            panel.grid.major = element_line(colour = "gray"),
+#                            panel.grid.minor = element_blank(),
+#                            axis.title = element_text(size = rel(1), colour = "black"),
+#                            axis.text = element_text(size = rel(1), colour = "black"),
+#                            line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+#             annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+# d=g
+# d
+MSE_permanova_precisionN<-ggarrange(a,b,c,d, ncol=2, nrow=2, common.legend = TRUE, legend="top")
+ggsave("./figures/Feb2019/MSE_permanova_precisionN_randomonly_days.pdf",width = 6,height=6,plot=MSE_permanova_precisionN)
+dev.off()
+```
+
+```{r}
+#Combine data of the previous block
+quant.upper = function(x) quantile(x, prob = 0.975, na.rm = TRUE)
+quant.lower = function(x) quantile(x, prob = 0.025, na.rm = TRUE)
+
+filelist<-list.files("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/")
+for (i in 1:length(filelist)){
+  filename=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",filelist[i],sep="")
+  model=read.csv(filename)
+  if (i == 1){
+    fullmodel=model
+  }
+  if (i > 1){
+    fullmodel=rbind(fullmodel,model)
+  }
+}
+unique(fullmodel$date_nsub)
+table(fullmodel$date_nsub)
+
+
+fullmodel_average<-fullmodel %>%
+    dplyr::group_by(transect_nsub,type,var) %>%
+    dplyr::summarize(Repeat1 = mean(V1, na.rm = TRUE),Repeat2 = mean(V2, na.rm = TRUE),Repeat3 = mean(V3, na.rm = TRUE),Repeat4 = mean(V4, na.rm = TRUE))
+
+fullmodel_CI<-fullmodel %>%
+    dplyr::group_by(transect_nsub,type,var) %>%
+    dplyr::summarize(upper1=quant.upper(V1),upper2=quant.upper(V2),upper3=quant.upper(V3),upper4=quant.upper(V4),
+                     lower1=quant.lower(V1),lower2=quant.lower(V2),lower3=quant.lower(V3),lower4=quant.lower(V4))
+
+# fullmodel_average_SA=fullmodel_average[which(fullmodel_average$var=="days"),]
+# fullmodel_CI_SA=fullmodel_CI[which(fullmodel_CI$var=="days"),]
+fullmodel_average_SF=fullmodel_average[which(fullmodel_average$var=="transects"),]
+fullmodel_CI_SF=fullmodel_CI[which(fullmodel_CI$var=="transects"),]
+fullmodel_average=fullmodel_average[which(fullmodel_average$var=="residual"),]
+fullmodel_CI=fullmodel_CI[which(fullmodel_CI$var=="residual"),]
+
+create_output<-function(fullmodel_average,fullmodel_CI){
+
+  means=fullmodel_average[which(fullmodel_average$type=="permutation"),]
+  means.b=fullmodel_average[which(fullmodel_average$type=="bootstrap"),]
+  upper=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("upper1","upper2","upper3","upper4")]
+  lower=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("lower1","lower2","lower3","lower4")]
+  
+  bias =  means[,c("Repeat1","Repeat2","Repeat3","Repeat4")] - means.b[,c("Repeat1","Repeat2","Repeat3","Repeat4")]
+  lower = lower+bias
+  upper = upper+bias
+  means=as.data.frame(means)
+  output = cbind(means, lower, upper)
+  output$type<-NULL
+  
+  output1=output[,c("transect_nsub","Repeat1","lower1","upper1")]
+  output1$n=1
+  output2=output[,c("transect_nsub","Repeat2","lower2","upper2")]
+  output2$n=2
+  output3=output[,c("transect_nsub","Repeat3","lower3","upper3")]
+  output3$n=3
+  output4=output[,c("transect_nsub","Repeat4","lower4","upper4")]
+  output4$n=4
+  colnames(output1)[2]="Repeat"
+  colnames(output1)[3]="lower"
+  colnames(output1)[4]="upper"
+  colnames(output2)[2]="Repeat"
+  colnames(output2)[3]="lower"
+  colnames(output2)[4]="upper"
+  colnames(output3)[2]="Repeat"
+  colnames(output3)[3]="lower"
+  colnames(output3)[4]="upper"
+  colnames(output4)[2]="Repeat"
+  colnames(output4)[3]="lower"
+  colnames(output4)[4]="upper"
+  output.rbind<-rbind(output1,output2,output3,output4)
+  output.rbind$effort=output.rbind$transect_nsub*output.rbind$n
+  plot(output.rbind$effort,output.rbind$Repeat)
+  #output.rbind$fdate_nsub=as.factor(output.rbind$date_nsub)
+  output.rbind$ftransect_nsub=as.factor(output.rbind$transect_nsub)
+  output.rbind$fn=as.factor(output.rbind$n)
+  output.rbind$Transects=as.factor(output.rbind$transect_nsub)
+  output.rbind$Repeats=as.factor(output.rbind$n)
+  return(output.rbind)
+}
+
+output.rbind=create_output(fullmodel_average,fullmodel_CI)
+#output.rbind_SA=create_output(fullmodel_average_SA,fullmodel_CI_SA)
+output.rbind_SF=create_output(fullmodel_average_SF,fullmodel_CI_SF)
+
+output.rbind_SF$Repeat=output.rbind_SF$Repeat/sqrt(output.rbind_SF$transect_nsub)
+output.rbind_SF$upper=output.rbind_SF$upper/sqrt(output.rbind_SF$transect_nsub)
+output.rbind_SF$lower=output.rbind_SF$lower/sqrt(output.rbind_SF$transect_nsub)
+
+xmax=4.1
+ymax=0.18
+
+g<-ggplot(data = output.rbind_SF,aes(x=n,y=Repeat,group=Transects))
+g<-g+geom_line(aes(colour=Transects),size=0.5)+geom_point(aes(colour=Transects))
+g<-g+xlab("Repeats")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind_SF,aes(x=n,ymin=lower,ymax=upper,fill=Transects,colour=Transects),alpha=0.2,size=0.1)
+g<-g+theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(C)" ,size=4,family="serif")
+c=g
+c
+
+xmax=20.1
+ymax=0.18
+
+g<-ggplot(data = output.rbind_SF,aes(x=effort,y=Repeat,group=Transects))
+g<-g+geom_line(aes(colour=Transects),size=0.5)+geom_point(aes(colour=Transects))
+g<-g+xlab("Sampling effort")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind_SF,aes(x=effort,ymin=lower,ymax=upper,fill=Transects,colour=Transects),alpha=0.2,size=0.1)
+g<-g+theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+d=g
+d
+
+xmax=4.1
+ymax=0.35
+
+g<-ggplot(data = output.rbind,aes(x=n,y=Repeat,group=Transects))
+g<-g+geom_line(aes(colour=Transects),size=0.5)+geom_point(aes(colour=Transects))
+g<-g+xlab("Repeats")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=n,ymin=lower,ymax=upper,fill=Transects,colour=Transects),alpha=0.2,size=0.1)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(A)" ,size=4,family="serif")
+a=g
+a
+
+xmax=20.1
+ymax=0.35
+
+g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Transects))
+g<-g+geom_line(aes(colour=Transects),size=0.5)+geom_point(aes(colour=Transects))
+g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Transects,colour=Transects),alpha=0.2,size=0.1)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(B)" ,size=4,family="serif")
+b=g
+b
+
+# g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Repeats))
+# g<-g+geom_line(aes(colour=Repeats),size=0.5)+geom_point(aes(colour=Repeats))
+# g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+# g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Repeats,colour=Repeats),alpha=0.2,size=0.1)+
+#     theme(
+#                            #legend.position="centre",
+#                            legend.title=element_text(size=10), legend.text=element_text(size=10),
+#                            legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+#                            legend.position=c(0.80, 0.7),
+#                            #panel.grid.major = element_blank(),
+#                            axis.line = element_line(colour = "black"),
+#                            text=element_text(size=8,  family="serif"),
+#                            panel.background = element_rect(fill = "white", colour = NA),
+#                            panel.grid.major = element_line(colour = "gray"),
+#                            panel.grid.minor = element_blank(),
+#                            axis.title = element_text(size = rel(1), colour = "black"),
+#                            axis.text = element_text(size = rel(1), colour = "black"),
+#                            line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+#             annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+# d=g
+# d
+MSE_permanova_precisionN<-ggarrange(a,b,c,d, ncol=2, nrow=2, common.legend = TRUE, legend="top")
+ggsave("./figures/Feb2019/MSE_permanova_precisionN_randomonly_transects.pdf",width = 6,height=6,plot=MSE_permanova_precisionN)
+dev.off()
+```
+
+```{r eval=FALSE}
+#Multivariate precision function based on residuals PERMANOVA advanced: Here we used transects and date as random effects, bootstrap only
+start_time <- Sys.time()
+
+  MSE.broad = function(data.repeat.10) {
+    type="adonis"
+    perm.species.amount=Personal_PERMANOVA(data.repeat=data.repeat.10,factors=factors,response='fish.dist',algo='+',type=type,transform="4root")
+    if (type=="adonis"){
+      perm.species.amount=perm.species.amount$aov.tab
+      MSE=perm.species.amount$MeanSqs[3]
+      MSA=perm.species.amount$MeanSqs[2]
+      MSF=perm.species.amount$MeanSqs[1]
+    }
+    return(c(MSE,MSA,MSF))
+  }
+  
+  
+  factors=c("fTransect","Date")
+  data.repeat.10=N1
+  nresamp = 10
+
+  # Resampling loop for each sample size.
+no_cores <- detectCores()
+cl <- makeCluster(4)
+registerDoParallel(cl)
+
+foreach (date_nsub = 2:10,.packages = "vegan") %dopar%
+{
+  for (date_iresamp in 1:nresamp) {
+    #date_sample=sample(levels(data.repeat.10$fDate),date_nsub,replace=FALSE)
+    date_sample.b=sample(levels(data.repeat.10$fDate),date_nsub,replace=TRUE)
+    #x=data.repeat.10[which(data.repeat.10$fDate %in% date_sample),]
+    for (k in 1:date_nsub){ #Another problem I just thought of involves the fact that initially there was no bootstrap for days, only permutations. This may give a wrong impression. I solved this here:
+      if (k==1){x.b=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b$boot=k
+      }
+      if (k>1){x.b.temp=data.repeat.10[which(data.repeat.10$fDate==date_sample.b[k]),]
+      x.b.temp$boot=k
+      x.b=rbind(x.b,x.b.temp)
+      }
+    }
+    x.b$Data_Transect=paste(x.b$Data_Transect,x.b$boot,sep=" ")
+    x.b$fDate=as.factor(paste(x.b$Date,x.b$boot))
+    x.b$Date=paste(x.b$Date,x.b$boot)
+    x.b$boot<-NULL
+    for (transect_nsub in 2:10){
+      for (transect_iresamp in 1:nresamp){
+        #transect_sample=sample(levels(x$fTransect),transect_nsub,replace=FALSE)
+        transect_sample.b=sample(levels(x$fTransect),transect_nsub,replace=TRUE)
+        #y=x[which(x$fTransect %in% transect_sample),]
+        for (l in 1:transect_nsub){ #Another problem I just thought of involves the fact that initially there was no bootstrap for days, only permutations. This may give a wrong impression. I solved this here:
+          if (l==1){y.b=x.b[which(x.b$fTransect==transect_sample.b[l]),]
+            y.b$boot=l
+          }
+          if (l>1){y.b.temp=x.b[which(x.b$fTransect==transect_sample.b[l]),]
+            y.b.temp$boot=l
+            y.b=rbind(y.b,y.b.temp)
+          }
+        }
+        # y.b$Data_Transect=paste(y.b$Data_Transect,y.b$boot,sep=" ")
+        # y.b$fDate=as.factor(paste(y.b$Date,y.b$boot))
+        # y.b$Date=paste(y.b$Date,y.b$boot)
+        y.b$fTransect=paste(y.b$fTransect,y.b$boot)
+        y.b$boot<-NULL
+        #multSE.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+        multSE.store.b = matrix(rep(NA,nresamp*8), ncol = 8, nrow = nresamp)
+        #multSA.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+        multSA.store.b = matrix(rep(NA,nresamp*8), ncol = 8, nrow = nresamp)
+        #multSF.store.p = matrix(rep(NA,nresamp*4), ncol = 4, nrow = nresamp)
+        multSF.store.b = matrix(rep(NA,nresamp*8), ncol = 8, nrow = nresamp)
+        for (nsub in 1:8) {
+          for (iresamp in 1:nresamp) {
+            #ivec.p = sample(which(x$Data_Transect==unique(x$Data_Transect)[1]), size = nsub, replace = FALSE) #Mistake I made was to use x$Transect instead of x$Data_Transect. This caused only 1 sample to be selected per transect although it might have been that we included multiple dates. By using Data_Transect instead we force the algorithm to select one sample per day and transect.
+            ivec.b = sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[1]), size = nsub, replace = TRUE)
+            for (i in 2:length(unique(x$Data_Transect))) {
+              #ivec.p = c(ivec.p,sample(which(x$Data_Transect==unique(x$Data_Transect)[i]), size = nsub, replace = FALSE))
+              ivec.b = c(ivec.b,sample(which(x.b$Data_Transect==unique(x.b$Data_Transect)[i]), size = nsub, replace = TRUE))
+            }
+            #MSE.broad.output.p=MSE.broad(x[ivec.p,])
+            MSE.broad.output.b=MSE.broad(x.b[ivec.b,])
+            #multSE.store.p[iresamp,nsub] = sqrt(MSE.broad.output.p[1]/(nsub)) #Another mistake I made was to use nsub here alone. However it should be used together with date_nsub (see earlier mistake). 
+            multSE.store.b[iresamp,nsub] = sqrt(MSE.broad.output.b[1]/(nsub))
+            #multSA.store.p[iresamp,nsub] = sqrt(MSE.broad.output.p[2]-MSE.broad.output.p[1])/(length(unique(x$fTransect))*nsub)
+            multSA.store.b[iresamp,nsub] = sqrt((MSE.broad.output.b[2]-MSE.broad.output.b[1])/(length(unique(x.b$fTransect))*nsub))
+            #multSF.store.p[iresamp,nsub] = sqrt(MSE.broad.output.p[3]-MSE.broad.output.p[1])/(length(unique(x$fDate))*nsub)
+            multSF.store.b[iresamp,nsub] = sqrt((MSE.broad.output.b[3]-MSE.broad.output.b[1])/(length(unique(x.b$fDate))*nsub))
+          }
+        }
+        #multSE.store.p<-as.data.frame(multSE.store.p)
+        multSE.store.b<-as.data.frame(multSE.store.b)
+        #multSE.store.p$date_nsub=date_nsub
+        #multSE.store.p$transect_nsub=transect_nsub
+        multSE.store.b$transect_nsub=transect_nsub
+        #multSE.store.p$date_iresamp=date_iresamp
+        #multSE.store.p$type="permutation"
+        multSE.store.b$date_nsub=date_nsub
+        multSE.store.b$date_iresamp=date_iresamp
+        multSE.store.b$type="bootstrap"
+        #multSE.store.p$var="residual"
+        multSE.store.b$var="residual"
+        
+        #multSA.store.p<-as.data.frame(multSA.store.p)
+        multSA.store.b<-as.data.frame(multSA.store.b)
+        #multSA.store.p$date_nsub=date_nsub
+        #multSA.store.p$transect_nsub=transect_nsub
+        multSA.store.b$transect_nsub=transect_nsub
+        #multSA.store.p$date_iresamp=date_iresamp
+        #multSA.store.p$type="permutation"
+        multSA.store.b$date_nsub=date_nsub
+        multSA.store.b$date_iresamp=date_iresamp
+        multSA.store.b$type="bootstrap"
+        #multSA.store.p$var="days"
+        multSA.store.b$var="days"
+        
+        #multSF.store.p<-as.data.frame(multSF.store.p)
+        multSF.store.b<-as.data.frame(multSF.store.b)
+        #multSF.store.p$date_nsub=date_nsub
+        #multSF.store.p$transect_nsub=transect_nsub
+        multSF.store.b$transect_nsub=transect_nsub
+        #multSF.store.p$date_iresamp=date_iresamp
+        #multSF.store.p$type="permutation"
+        multSF.store.b$date_nsub=date_nsub
+        multSF.store.b$date_iresamp=date_iresamp
+        multSF.store.b$type="bootstrap"
+        #multSF.store.p$var="transects"
+        multSF.store.b$var="transects"
+        
+        if (date_iresamp==1){
+            #multSE.store.p.combo=multSE.store.p
+            multSE.store.b.combo=multSE.store.b
+            #multSA.store.p.combo=multSA.store.p
+            multSA.store.b.combo=multSA.store.b
+            #multSF.store.p.combo=multSF.store.p
+            multSF.store.b.combo=multSF.store.b
+        } else {
+            #multSE.store.p.combo=rbind(multSE.store.p.combo,multSE.store.p)
+            multSE.store.b.combo=rbind(multSE.store.b.combo,multSE.store.b)
+            #multSA.store.p.combo=rbind(multSA.store.p.combo,multSA.store.p)
+            multSA.store.b.combo=rbind(multSA.store.b.combo,multSA.store.b)
+            #multSF.store.p.combo=rbind(multSA.store.p.combo,multSF.store.p)
+            multSF.store.b.combo=rbind(multSA.store.b.combo,multSF.store.b)
+        }
+      }
+      #filerp=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",date_nsub,date_iresamp,transect_nsub,"_rp.csv",sep="")
+      filerb=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom_only_bootstrap/",date_nsub,date_iresamp,transect_nsub,"_rb.csv",sep="")
+      #fileap=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",date_nsub,date_iresamp,transect_nsub,"_ap.csv",sep="")
+      fileab=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom_only_bootstrap/",date_nsub,date_iresamp,transect_nsub,"_ab.csv",sep="")
+      #filefp=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom/",date_nsub,date_iresamp,transect_nsub,"_fp.csv",sep="")
+      filefb=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_allrandom_only_bootstrap/",date_nsub,date_iresamp,transect_nsub,"_fb.csv",sep="")
+      #write.csv(multSE.store.p.combo,filerp)
+      write.csv(multSE.store.b.combo,filerb)
+      #write.csv(multSA.store.p.combo,fileap)
+      write.csv(multSA.store.b.combo,fileab)
+      #write.csv(multSF.store.p.combo,filefp)
+      write.csv(multSF.store.b.combo,filefb)
+    }
+  }
+}
+stopCluster(cl)
+end_time <- Sys.time()
+end_time - start_time
+```
+
+```{r}
+#Combine data of the previous block
+quant.upper = function(x) quantile(x, prob = 0.975, na.rm = TRUE)
+quant.lower = function(x) quantile(x, prob = 0.025, na.rm = TRUE)
+
+filelist<-list.files("./data/Feb2019/internal/precision/permanova/advanced_transect_date_only_bootstrap/")
+for (i in 1:length(filelist)){
+  filename=paste("./data/Feb2019/internal/precision/permanova/advanced_transect_date_only_bootstrap/",filelist[i],sep="")
+  model=read.csv(filename)
+  if (ncol(model)==8){model$var="residual"}
+  if (i == 1){
+    fullmodel=model
+  }
+  if (i > 1){
+    fullmodel=rbind(fullmodel,model)
+  }
+}
+unique(fullmodel$date_nsub)
+table(fullmodel$date_nsub)
+
+
+fullmodel_average<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,var) %>%
+    dplyr::summarize(Repeat1 = mean(V1, na.rm = TRUE),Repeat2 = mean(V2, na.rm = TRUE),Repeat3 = mean(V3, na.rm = TRUE),Repeat4 = mean(V4, na.rm = TRUE),Repeat5 = mean(V5, na.rm = TRUE),Repeat6 = mean(V6, na.rm = TRUE),Repeat7 = mean(V7, na.rm = TRUE),Repeat8 = mean(V8, na.rm = TRUE),Repeat9 = mean(V9, na.rm = TRUE),Repeat10 = mean(V10, na.rm = TRUE),Repeat11 = mean(V11, na.rm = TRUE),Repeat12 = mean(V12, na.rm = TRUE))
+
+fullmodel_CI<-fullmodel %>%
+    dplyr::group_by(date_nsub,type,var) %>%
+    dplyr::summarize(upper1=quant.upper(V1),upper2=quant.upper(V2),upper3=quant.upper(V3),upper4=quant.upper(V4),
+                     lower1=quant.lower(V1),lower2=quant.lower(V2),lower3=quant.lower(V3),lower4=quant.lower(V4),
+                     upper5=quant.upper(V5),upper6=quant.upper(V6),upper7=quant.upper(V7),upper8=quant.upper(V8),
+                     lower5=quant.lower(V5),lower6=quant.lower(V6),lower7=quant.lower(V7),lower8=quant.lower(V8),
+                     upper9=quant.upper(V9),upper10=quant.upper(V10),upper11=quant.upper(V11),upper12=quant.upper(V12),
+                     lower9=quant.lower(V9),lower10=quant.lower(V10),lower11=quant.lower(V11),lower12=quant.lower(V12))
+
+fullmodel_average_SA=fullmodel_average[which(fullmodel_average$var=="days"),]
+fullmodel_CI_SA=fullmodel_CI[which(fullmodel_CI$var=="days"),]
+fullmodel_average_SF=fullmodel_average[which(fullmodel_average$var=="transects"),]
+fullmodel_CI_SF=fullmodel_CI[which(fullmodel_CI$var=="transects"),]
+fullmodel_average=fullmodel_average[which(fullmodel_average$var=="residual"),]
+fullmodel_CI=fullmodel_CI[which(fullmodel_CI$var=="residual"),]
+
+create_output<-function(fullmodel_average,fullmodel_CI){
+
+  means.b=fullmodel_average[which(fullmodel_average$type=="bootstrap"),]
+  upper=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("upper1","upper2","upper3","upper4","upper5","upper6","upper7","upper8","upper9","upper10","upper11","upper12")]
+  lower=fullmodel_CI[which(fullmodel_CI$type=="bootstrap"),c("lower1","lower2","lower3","lower4","lower5","lower6","lower7","lower8","lower9","lower10","lower11","lower12")]
+
+  lower = lower
+  upper = upper
+  means=as.data.frame(means.b)
+  output = cbind(means, lower, upper)
+  output$type<-NULL
+
+  output1=output[,c("date_nsub","Repeat1","lower1","upper1")]
+  output1$n=1
+  output2=output[,c("date_nsub","Repeat2","lower2","upper2")]
+  output2$n=2
+  output3=output[,c("date_nsub","Repeat3","lower3","upper3")]
+  output3$n=3
+  output4=output[,c("date_nsub","Repeat4","lower4","upper4")]
+  output4$n=4
+  output5=output[,c("date_nsub","Repeat5","lower5","upper5")]
+  output5$n=5
+  output6=output[,c("date_nsub","Repeat6","lower6","upper6")]
+  output6$n=6
+  output7=output[,c("date_nsub","Repeat7","lower7","upper7")]
+  output7$n=7
+  output8=output[,c("date_nsub","Repeat8","lower8","upper8")]
+  output8$n=8
+  output9=output[,c("date_nsub","Repeat9","lower9","upper9")]
+  output9$n=9
+  output10=output[,c("date_nsub","Repeat10","lower10","upper10")]
+  output10$n=10
+  output11=output[,c("date_nsub","Repeat11","lower11","upper11")]
+  output11$n=11
+  output12=output[,c("date_nsub","Repeat12","lower12","upper12")]
+  output12$n=12
+  colnames(output1)[2]="Repeat"
+  colnames(output1)[3]="lower"
+  colnames(output1)[4]="upper"
+  colnames(output2)[2]="Repeat"
+  colnames(output2)[3]="lower"
+  colnames(output2)[4]="upper"
+  colnames(output3)[2]="Repeat"
+  colnames(output3)[3]="lower"
+  colnames(output3)[4]="upper"
+  colnames(output4)[2]="Repeat"
+  colnames(output4)[3]="lower"
+  colnames(output4)[4]="upper"
+  colnames(output5)[2]="Repeat"
+  colnames(output5)[3]="lower"
+  colnames(output5)[4]="upper"
+  colnames(output6)[2]="Repeat"
+  colnames(output6)[3]="lower"
+  colnames(output6)[4]="upper"
+  colnames(output7)[2]="Repeat"
+  colnames(output7)[3]="lower"
+  colnames(output7)[4]="upper"
+  colnames(output8)[2]="Repeat"
+  colnames(output8)[3]="lower"
+  colnames(output8)[4]="upper"
+  colnames(output9)[2]="Repeat"
+  colnames(output9)[3]="lower"
+  colnames(output9)[4]="upper"
+  colnames(output10)[2]="Repeat"
+  colnames(output10)[3]="lower"
+  colnames(output10)[4]="upper"
+  colnames(output11)[2]="Repeat"
+  colnames(output11)[3]="lower"
+  colnames(output11)[4]="upper"
+  colnames(output12)[2]="Repeat"
+  colnames(output12)[3]="lower"
+  colnames(output12)[4]="upper"
+  output.rbind<-rbind(output1,output2,output3,output4,output5,output6,output7,output8,output9,output10,output11,output12)
+  output.rbind$effort=output.rbind$date_nsub*output.rbind$n
+  plot(output.rbind$effort,output.rbind$Repeat)
+  output.rbind$fdate_nsub=as.factor(output.rbind$date_nsub)
+  output.rbind$fn=as.factor(output.rbind$n)
+  #output.rbind=output.rbind[-1,]
+  output.rbind$Days=as.factor(output.rbind$date_nsub)
+  output.rbind$Repeats=as.factor(output.rbind$n)
+  return(output.rbind)
+}
+
+output.rbind=create_output(fullmodel_average,fullmodel_CI)
+output.rbind_SA=create_output(fullmodel_average_SA,fullmodel_CI_SA)
+
+output.rbind_SA$Repeat=output.rbind_SA$Repeat/output.rbind_SA$date_nsub
+output.rbind_SA$upper=output.rbind_SA$upper/output.rbind_SA$date_nsub
+output.rbind_SA$lower=output.rbind_SA$lower/output.rbind_SA$date_nsub
+
+
+xmax=13
+ymax=0.03
+
+g<-ggplot(data = output.rbind_SA,aes(x=n,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Repeats")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind_SA,aes(x=n,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.09,colour = NA)
+g<-g+theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(C)" ,size=4,family="serif")
+c=g
+c
+
+xmax=181
+ymax=0.03
+
+g<-ggplot(data = output.rbind_SA,aes(x=effort,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Sampling effort")+ylab("MultSA PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind_SA,aes(x=effort,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.09,colour = NA)
+g<-g+theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+d=g
+d
+
+xmax=13
+ymax=0.35
+
+g<-ggplot(data = output.rbind,aes(x=n,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Repeats")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=n,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.09,colour = NA)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(A)" ,size=4,family="serif")
+a=g
+a
+
+xmax=181
+ymax=0.30
+
+g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Days))
+g<-g+geom_line(aes(colour=Days),size=0.5)+geom_point(aes(colour=Days))
+g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Days,colour=Days),alpha=0.09,colour = NA)+
+    theme(
+                           #legend.position="none",
+                           legend.title=element_text(size=10), legend.text=element_text(size=10),
+                           legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+                           legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=8,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+            annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(B)" ,size=4,family="serif")
+b=g
+b
+
+# g<-ggplot(data = output.rbind,aes(x=effort,y=Repeat,group=Repeats))
+# g<-g+geom_line(aes(colour=Repeats),size=0.5)+geom_point(aes(colour=Repeats))
+# g<-g+xlab("Sampling effort")+ylab("MultSE PERMANOVA")+xlim(0,xmax)+ylim(0,ymax)
+# g<-g+geom_ribbon(data=output.rbind,aes(x=effort,ymin=lower,ymax=upper,fill=Repeats,colour=Repeats),alpha=0.2,size=0.1)+
+#     theme(
+#                            #legend.position="centre",
+#                            legend.title=element_text(size=10), legend.text=element_text(size=10),
+#                            legend.justification=c(0.25,0.25),legend.key.size =  unit(0.1, "in"),
+#                            legend.position=c(0.80, 0.7),
+#                            #panel.grid.major = element_blank(),
+#                            axis.line = element_line(colour = "black"),
+#                            text=element_text(size=8,  family="serif"),
+#                            panel.background = element_rect(fill = "white", colour = NA),
+#                            panel.grid.major = element_line(colour = "gray"),
+#                            panel.grid.minor = element_blank(),
+#                            axis.title = element_text(size = rel(1), colour = "black"),
+#                            axis.text = element_text(size = rel(1), colour = "black"),
+#                            line = element_line(colour = "black", size = 0.25, linetype = 1, lineend = "butt"))+
+#             annotate("text", x=xmax-xmax/10, y=ymax-ymax/10, label= "(D)" ,size=4,family="serif")
+# d=g
+# d
+MSE_permanova_precisionN<-ggarrange(a,b,c,d, ncol=2, nrow=2, common.legend = TRUE, legend="top")
+ggsave("./figures/Feb2019/MSE_permanova_precisionN_onlybootstrap.pdf",width = 6,height=6,plot=MSE_permanova_precisionN)
+dev.off()
+```

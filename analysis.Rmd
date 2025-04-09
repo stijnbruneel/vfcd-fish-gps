@@ -1,0 +1,1482 @@
+---
+title: "Feb2019"
+author: "Stijn Bruneel"
+date: "2 mei 2019"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+# knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+```{r warning=FALSE, message=FALSE, include=FALSE}
+source("./source/Libraries.R")
+source("./source/f.old.adonis.R")
+```
+
+```{r}
+#Theme for ggplot
+clean_theme<-theme(legend.title=element_text(size=15), legend.text=element_text(size=15),
+                           legend.justification=c(0.5,0.5),legend.key.size =  unit(0.3, "in"),
+                           #legend.position=c(0.80, 0.7),
+                           #panel.grid.major = element_blank(),
+                           axis.line = element_line(colour = "black"),
+                           text=element_text(size=16,  family="serif"),
+                           panel.background = element_rect(fill = "white", colour = NA),
+                           panel.grid.major = element_line(colour = "gray"),
+                           panel.grid.minor = element_blank(),
+                           axis.title = element_text(size = rel(1), colour = "black"),
+                           axis.text = element_text(size = rel(1), colour = "black"),
+                           line = element_line(colour = "black", size = 0.5, linetype = 1, lineend = "butt"))
+```
+
+```{r}
+#Source code for STI models
+source("./source/stimodels_personal3.R")
+source("./source/manovRDa_personal.R")
+```
+
+```{r echo=FALSE}
+#List with species names
+specieslist=read_excel("./data/external/specieslist.xlsx")
+specieslist=as.data.frame(specieslist[,2])
+colnames(specieslist)="Species"
+specieslist<-t(specieslist)
+colnames(specieslist)<-specieslist
+```
+
+```{r warning=FALSE}
+N1=read_excel("./data/external/N1_Time.xlsx") #biological data (processed)
+Habitat=read_excel("./data/external/cleansed_video_data_transect.xlsx") #biolgical data (unprocessed) 
+```
+
+```{r}
+table(N1$Date) #Only 16 observations on last day compared to 20 on the other days.
+```
+
+```{r warning=FALSE}
+N1<-N1[which(N1$Date!=as.POSIXct("2019-02-15",tz="GMT")),] #remove one day with questionable data (close to sunset which caused drop in visibility)
+```
+
+```{r}
+#Preprocessing variables in N1
+N1$DateTime=paste(N1$OnlyDate,N1$OnlyTimeAverage)
+N1$DateTime=as.POSIXct(N1$DateTime, format="%Y-%m-%d %Hh%M",tz="utc")
+N1$DateTide=paste(N1$OnlyDate,N1$`Low Tide`)
+N1$DateTide=as.POSIXct(N1$DateTide, format="%Y-%m-%d %Hh%M",tz="utc")
+N1$TideDif<-as.numeric(difftime(N1$DateTime,N1$DateTide,units="mins"))
+N1$NumericTime<-as.numeric(difftime(as.POSIXct(paste(N1$OnlyDate[1],N1$OnlyTimeAverage), format="%Y-%m-%d %Hh%M",tz="utc")[1],as.POSIXct(paste(N1$OnlyDate[1],N1$OnlyTimeAverage), format="%Y-%m-%d %Hh%M",tz="utc"),units = "mins"))
+N1$TideDif<-as.numeric(difftime(N1$DateTime,N1$DateTide,units="mins"))
+N1$Date=as.character(N1$OnlyDate)
+N1$fDate=as.factor(N1$Date)
+
+N1$datetime=paste(N1$OnlyDate,N1$OnlyTime)
+N1$datetimeAverage=paste(N1$OnlyDate,N1$OnlyTimeAverage)
+N1$datetime=as.POSIXct(N1$datetime,format="%Y-%m-%d %Hh%M",tz="uct")
+N1$datetimeAverage=as.POSIXct(N1$datetimeAverage,format="%Y-%m-%d %Hh%M",tz="uct")
+N1$difftime<-difftime(N1$datetime,N1$datetime[1],units="mins")
+N1$difftimeAverage<-difftime(N1$datetimeAverage,N1$datetimeAverage[1],units="mins")
+N1$Data_Transect=paste(N1$Date,N1$`Transect number`)
+N1$fData_Transect=as.factor(N1$Data_Transect)
+N1$fTransect=as.factor(N1$`Transect number`)
+N1$fRepetition=as.factor(N1$Repetition)
+```
+
+```{r}
+#function Transformation_data(data,transformation_type) to transform the biological data 
+source("./source/Transformation_data.R")
+```
+
+```{r}
+#Determin diss. matrix
+fish.mat<-Transformation_data(N1,"4root")
+fish.dist=vegdist(fish.mat, method="bray",binary=FALSE,diag = TRUE)
+```
+
+```{r}
+#function to perform permdisp and make plots
+#Personal_DISPERSION(data,group)
+source("./source/Personal_DISPERSION.R")
+```
+
+```{r}
+permdisp_date=Personal_DISPERSION(N1,"Date")
+Personal_DISPERSION(N1,"Repetition")
+Personal_DISPERSION(N1,"fTransect")
+Personal_DISPERSION(N1,"Data_Transect")
+```
+
+```{r}
+# N1_permdisp=N1
+# N1_permdisp$k=1
+# N1_permdisp_or=N1_permdisp
+# t=6
+# for (k in 2:5){
+#   for (i in 1:length(unique(N1_permdisp_or$fDate))){
+#     if (i+k-1<=5){
+#       N1_permdisp_or_temp<-N1_permdisp_or[which(N1_permdisp_or$fDate==unique(N1_permdisp_or$fDate)[seq(from=i,to=i+k-1,by=1)]),]
+#       N1_permdisp_or_temp$fDate=as.factor(t)
+#       N1_permdisp_or_temp$k=k
+#       N1_permdisp=rbind(N1_permdisp,N1_permdisp_or_temp)
+#       t=t+1
+#     }
+#   }
+# }
+# permdisp_date=Personal_DISPERSION(N1_permdisp,"fDate")
+# N1_permdisp$distances<-permdisp_date$distances
+# N1_permdisp_average<-N1_permdisp %>%
+#     dplyr::group_by(k) %>%
+#     dplyr::summarize(mean = mean(distances, na.rm = TRUE))
+# N1_permdisp_average
+```
+
+```{r}
+# N1_permdisp=N1
+# N1_permdisp$k=1
+# N1_permdisp_or=N1_permdisp
+# t=6
+# for (k in 2:5){
+#   for (l in 1:10){
+#     dates=sample(unique(N1_permdisp_or$Date), size = k, replace = FALSE)
+#     N1_permdisp_or_temp=N1_permdisp_or[which(N1_permdisp_or$fDate %in% dates),]
+#     N1_permdisp_or_temp$fDate=as.factor(t)
+#     N1_permdisp_or_temp$k=k
+#     N1_permdisp=rbind(N1_permdisp,N1_permdisp_or_temp)
+#     t=t+1
+#   }
+# }
+# permdisp_date=Personal_DISPERSION(N1_permdisp,"fDate")
+# N1_permdisp$distances<-permdisp_date$distances
+# N1_permdisp_average<-N1_permdisp %>%
+#     dplyr::group_by(k) %>%
+#     dplyr::summarize(mean = mean(distances, na.rm = TRUE))
+# N1_permdisp_average
+```
+
+```{r}
+#Accuracy estimates based on centroids for the factor days 
+N1_permdisp_or=N1
+N1_permdisp_or$k=NA
+for (l in 1:1000){
+  for (k in 1:5){
+    dates=sample(unique(N1_permdisp_or$Date), size = k, replace = FALSE)
+    N1_permdisp_temp=N1_permdisp_or[which(N1_permdisp_or$fDate %in% dates),]
+    N1_permdisp_temp$k=k
+    if (k==1){
+      N1_permdisp=N1_permdisp_temp
+    } else {N1_permdisp=rbind(N1_permdisp,N1_permdisp_temp)}
+  }
+  fish.mat.disp=Transformation_data(N1_permdisp,"4root")
+  fish.dist.disp=vegdist(fish.mat.disp, method='bray')
+  dist.cent<-as.data.frame(as.matrix(dist_multi_centroids(fish.dist.disp,N1_permdisp$k)))[5,]
+  if (l==1){
+    dist.cent.store=dist.cent
+  } else {dist.cent.store=rbind(dist.cent.store,dist.cent)}
+}
+
+mean(unique(dist.cent.store$`1`))
+mean(unique(dist.cent.store$`2`))
+mean(unique(dist.cent.store$`3`))
+mean(unique(dist.cent.store$`4`))
+mean(unique(dist.cent.store$`5`))
+
+sd(unique(dist.cent.store$`1`))/sqrt(length(unique(dist.cent.store$`1`)))
+sd(unique(dist.cent.store$`2`))/sqrt(length(unique(dist.cent.store$`2`)))
+sd(unique(dist.cent.store$`3`))/sqrt(length(unique(dist.cent.store$`3`)))
+sd(unique(dist.cent.store$`4`))/sqrt(length(unique(dist.cent.store$`4`)))
+sd(unique(dist.cent.store$`5`))/sqrt(length(unique(dist.cent.store$`5`)))
+
+```
+
+```{r}
+# N1_permdisp_or=N1
+# N1_permdisp_or$k=NA
+# 
+#     for (k in 1:5){
+#       for (l in 1:1000){
+#     dates=sample(unique(N1_permdisp_or$Date), size = k, replace = FALSE)
+#     N1_permdisp_temp=N1_permdisp_or[which(N1_permdisp_or$fDate %in% dates),]
+#     N1_permdisp_temp$k=k
+#     fish.mat.disp=Transformation_data(N1_permdisp_temp,"4root")
+#     fish.dist.disp=vegdist(fish.mat.disp, method='bray')
+#     dist.cent<-as.data.frame(as.matrix(dist_to_centroids(fish.dist.disp,N1_permdisp_temp$k)))
+#       }
+#     }
+# 
+# mean(unique(dist.cent.store$`1`))
+# mean(unique(dist.cent.store$`2`))
+# mean(unique(dist.cent.store$`3`))
+# mean(unique(dist.cent.store$`4`))
+# mean(unique(dist.cent.store$`5`))
+
+```
+
+```{r}
+# N1_permdisp=N1
+# N1_permdisp$k=1
+# N1_permdisp_or=N1_permdisp
+# t=6
+# for (k in 2:5){
+#   for (i in 1:length(unique(N1_permdisp_or$fTransect))){
+#     if (i+k-1<=5){
+#       N1_permdisp_or_temp<-N1_permdisp_or[which(N1_permdisp_or$fTransect==unique(N1_permdisp_or$fTransect)[seq(from=i,to=i+k-1,by=1)]),]
+#       N1_permdisp_or_temp$fTransect=as.factor(t)
+#       N1_permdisp_or_temp$k=k
+#       N1_permdisp=rbind(N1_permdisp,N1_permdisp_or_temp)
+#       t=t+1
+#     }
+#   }
+# }
+# permdisp_date=Personal_DISPERSION(N1_permdisp,"fTransect")
+# N1_permdisp$distances<-permdisp_date$distances
+# N1_permdisp_average<-N1_permdisp %>%
+#     dplyr::group_by(k) %>%
+#     dplyr::summarize(mean = mean(distances, na.rm = TRUE))
+# N1_permdisp_average
+```
+
+```{r}
+# N1_permdisp=N1
+# N1_permdisp$k=1
+# N1_permdisp_or=N1_permdisp
+# t=6
+# for (k in 2:5){
+#   for (l in 1:10){
+#     dates=sample(unique(N1_permdisp_or$fTransect), size = k, replace = FALSE)
+#     N1_permdisp_or_temp=N1_permdisp_or[which(N1_permdisp_or$fTransect %in% dates),]
+#     N1_permdisp_or_temp$fTransect=as.factor(t)
+#     N1_permdisp_or_temp$k=k
+#     N1_permdisp=rbind(N1_permdisp,N1_permdisp_or_temp)
+#     t=t+1
+#   }
+# }
+# permdisp_date=Personal_DISPERSION(N1_permdisp,"fTransect")
+# N1_permdisp$distances<-permdisp_date$distances
+# N1_permdisp_average<-N1_permdisp %>%
+#     dplyr::group_by(k) %>%
+#     dplyr::summarize(mean = mean(distances, na.rm = TRUE))
+# N1_permdisp_average
+```
+
+```{r}
+#Accuracy estimates based on centroids for the factor transects 
+N1_permdisp_or=N1
+N1_permdisp_or$k=NA
+for (l in 1:1000){
+  for (k in 1:5){
+    transects=sample(unique(N1_permdisp_or$fTransect), size = k, replace = FALSE)
+    N1_permdisp_temp=N1_permdisp_or[which(N1_permdisp_or$fTransect %in% transects),]
+    N1_permdisp_temp$k=k
+    if (k==1){
+      N1_permdisp=N1_permdisp_temp
+    } else {N1_permdisp=rbind(N1_permdisp,N1_permdisp_temp)}
+  }
+  fish.mat.disp=Transformation_data(N1_permdisp,"4root")
+  fish.dist.disp=vegdist(fish.mat.disp, method='bray')
+  dist.cent<-as.data.frame(as.matrix(dist_multi_centroids(fish.dist.disp,N1_permdisp$k)))[5,]
+  if (l==1){
+    dist.cent.store=dist.cent
+  } else {dist.cent.store=rbind(dist.cent.store,dist.cent)}
+}
+
+mean(unique(dist.cent.store$`1`))
+mean(unique(dist.cent.store$`2`))
+mean(unique(dist.cent.store$`3`))
+mean(unique(dist.cent.store$`4`))
+mean(unique(dist.cent.store$`5`))
+
+sd(unique(dist.cent.store$`1`))/sqrt(length(unique(dist.cent.store$`1`)))
+sd(unique(dist.cent.store$`2`))/sqrt(length(unique(dist.cent.store$`2`)))
+sd(unique(dist.cent.store$`3`))/sqrt(length(unique(dist.cent.store$`3`)))
+sd(unique(dist.cent.store$`4`))/sqrt(length(unique(dist.cent.store$`4`)))
+sd(unique(dist.cent.store$`5`))/sqrt(length(unique(dist.cent.store$`5`)))
+
+```
+
+```{r}
+#function to perform permanova analysis
+source("./source/Personal_PERMANOVA.R")
+```
+
+```{r}
+source("./source/pairwise_adonis.R")
+```
+
+```{r}
+#Perform PERMANOVA analysis
+perm1<-Personal_PERMANOVA(N1,c('Date','fRepetition','fTransect'),'fish.dist','*',"adonis",transform="4root")
+perm2<-Personal_PERMANOVA(N1,c('Date','fRepetition','fTransect','Date:fRepetition','Date:fTransect','fRepetition:fTransect'),'fish.dist','+',"adonis",transform="4root")
+perm7<-Personal_PERMANOVA(N1,c('Date','fTransect','Date:fTransect'),'fish.dist','+',"adonis",transform="4root")
+write.csv(as.data.frame(round(perm2$aov.tab,digits = 2)),"./data/internal/permanova.csv")
+N1.temp=N1[-which(N1$Date %in% unique(N1$Date)[c(4,1,3,5)] & N1$Repetition %in% unique(N1$Repetition)[c(7,3,5)]),]
+perm3<-Personal_PERMANOVA(N1.temp,c('fTransect'),'fish.dist','+',"adonis",transform="4root",strata="Date")
+perm4<-Personal_PERMANOVA(N1.temp,c('fTransect'),'fish.dist','+',"adonis",transform="4root",strata=NULL)
+perm5<-Personal_PERMANOVA(N1.temp,c('fTransect','Date'),'fish.dist','+',"adonis",transform="4root",strata="Date")
+perm6<-Personal_PERMANOVA(N1.temp,c('fTransect','Date'),'fish.dist','*',"adonis",transform="4root",strata=NULL)
+```
+
+```{r}
+N1.temp=N1[-which(N1$Date %in% unique(N1$Date)[c(4,1,3)]),]
+N1.temp=N1.temp[-which(N1.temp$Repetition %in% unique(N1.temp$Repetition)[c(3,4)]),]
+permpws<-pairwise.adonis(N1.temp,factors=N1.temp$fTransect)
+#permpws_strata<-pairwise.adonis(N1.temp,factors=N1.temp$fTransect,strata="Date")
+```
+
+```{r}
+#Determine Habitat cover per transect
+HabitatShare<-read_excel("./data/external/Habitats.xlsx")
+HabitatShare$`sand with rocks`=HabitatShare$`sand with rocks`+HabitatShare$`sand between rocks` #sand between rocks has to little cover
+HabitatShare$`sand between rocks`<-NULL 
+HabitatShare$`Part of transect`<-NULL
+
+#asin sqrt transformation to deal with skewness of proportional habitat covers
+HabitatShare[,c(3:6)]=asin(sqrt(HabitatShare[,c(3:6)]/100))
+pairs(HabitatShare[,c(2:6)])
+
+HabitatShare_per_transect<-HabitatShare %>%
+    dplyr::group_by(`Transect number`) %>%
+    dplyr::summarize_all(funs(mean)) #Determine cover of habitat class per transect
+
+HabitatShare_per_transect$complexity<-(-1)*(HabitatShare_per_transect$`sand with rocks`*log(HabitatShare_per_transect$`sand with rocks`)+HabitatShare_per_transect$`rocks with sand`*log(HabitatShare_per_transect$`rocks with sand`)+HabitatShare_per_transect$rocks*log(HabitatShare_per_transect$rocks)+HabitatShare_per_transect$bedrock*log(HabitatShare_per_transect$bedrock)) #Complexity is similar to shannon diversity but for habitat cover
+```
+
+```{r warning=FALSE}
+#Habitat is the unprocessed biological data set
+Habitat<-Habitat[which(Habitat$Date!=as.POSIXct("2019-02-15",tz="GMT")),]
+Habitat$Abiotic[which(Habitat$Abiotic=="sand between rocks")]="sand with rocks" #remove habitat class with too small cover
+```
+
+```{r}
+#Spatial analysis: Sum through time
+Habitat_pivot<-Habitat %>% group_by(Species, Abiotic, `Transect number`) %>% tally()  #number of encounters per species per habitat
+Habitat_pivot$fAbiotic<-as.factor(Habitat_pivot$Abiotic) 
+
+for (i in 1:length(specieslist)){
+  Species<-as.character(specieslist[i]) 
+  z<-Habitat_pivot[which(Habitat_pivot$Species == Species),] 
+  fAbiotic<-unique(Habitat_pivot$fAbiotic)      # de verschillende habitats die voorkomen eruit halen
+  Transect<-unique(Habitat_pivot$`Transect number`)  # de verschillende herhalingen die voorkomen eruit halen
+  
+  emptydf<-expand.grid(Species=Species,fAbiotic=fAbiotic,Transect=Transect) 
+  emptydf=emptydf[-which(is.na(emptydf$fAbiotic)==TRUE),]
+  emptydf=emptydf[-which(emptydf$fAbiotic=="watercolumn"),]
+  emptydf$n=0
+  for (j in 1:nrow(z)){
+    emptydf$n[which(emptydf$Species==z$Species[j] & emptydf$fAbiotic==z$fAbiotic[j] & emptydf$Transect==z$`Transect number`[j])]=z$n[j]
+  }
+  emptydf$Habitatshare=NA
+  for (k in 1:nrow(emptydf)){
+    emptydf$Habitatshare[k]=HabitatShare_per_transect[which(HabitatShare_per_transect$`Transect number`==emptydf$Transect[k]),which(colnames(HabitatShare_per_transect)==emptydf$fAbiotic[k])]
+  }
+  emptydf$Habitatshare<-as.numeric(emptydf$Habitatshare)
+  emptydf$density=emptydf$n/emptydf$Habitatshare
+  print(Species)
+  emptydf$fTransect<-as.factor(emptydf$Transect)
+  if (sum(emptydf$n)!=0){
+    M1<-lm(density~1+fAbiotic,data=emptydf)
+    print(summary(M1))
+  }
+}
+```
+
+```{r}
+#Add habitat data to biological data
+N1$BeforeMerge=1:nrow(N1)
+N1=merge(N1,HabitatShare_per_transect,by.y="Transect number",sort=FALSE)
+N1=N1[order(N1$BeforeMerge),]
+N1$BeforeMerge<-NULL
+```
+
+```{r}
+source("./source/Legendre_Rsquared_functions.R")
+```
+
+```{r}
+#Couple simulations (loess) of envrionmental data with biological data
+env=read_excel("./data/external/env_noBDL.xlsx",na="NA")
+t=0
+env.table <- as.data.frame(matrix(NA, nrow = 9, ncol = 4))
+colnames(env.table)=c("mean.var","sd.var","min.var","max.var")
+rownames(env.table)=c("pH","EC","T","DO","PO4","NO2","NH4","NO3","turbidity")
+for (i in c("pH","EC","T","DO","PO4","NO2","NH4","NO3","turbidity")){
+  t=t+1
+  env.table$mean.var[t]=mean(unlist(env[,i]),na.rm=TRUE)
+  env.table$sd.var[t]=sd(unlist(env[,i]),na.rm=TRUE)
+  env.table$min.var[t]=min(unlist(env[,i]),na.rm=TRUE)
+  env.table$max.var[t]=max(unlist(env[,i]),na.rm=TRUE)
+}
+write.csv(env.table,"./data/internal/env_table.csv")
+env$NO2=log(env$NO2)
+env$NH4=log(env$NH4)
+env$turbidity=log(env$turbidity)
+env$FNU=log(env$FNU)
+env$DateTime=paste(env$Date,env$Time)
+env$DateTime=as.POSIXct(env$DateTime, format="%Y-%m-%d %Hh%M",tz="utc")
+env$DateTide=paste(env$Date,env$`Low tide`)
+env$DateTide=as.POSIXct(env$DateTide, format="%Y-%m-%d %Hh%M",tz="utc")
+env$TideDif<-as.numeric(difftime(env$DateTime,env$DateTide,units="mins"))
+env[,c("mvph","mvorp","DO(mg/L)Hach","EC(ms/cmA)","omega","theta","P(mmHg)","TP","TN")]<-NULL
+env$Date=as.character(env$Date)
+env$NumericTime<-as.numeric(difftime(as.POSIXct(paste(env$Date[1],env$Time), format="%Y-%m-%d %Hh%M",tz="utc")[1],as.POSIXct(paste(env$Date[1],env$Time), format="%Y-%m-%d %Hh%M",tz="utc"),units = "mins"))
+N1[colnames(env[,c(4:15)])] <- NA
+pairs(env[,c("pH","EC","T","DO","PO4","NO2","NH4","NO3","turbidity")])
+for (i in c("pH","EC","T","DO","PO4","NO2","NH4","NO3","turbidity")){
+  env_temp<-env
+  env_temp<-env_temp[which(is.na(env_temp[,i])==FALSE),]
+  g<-ggplot(data=env_temp,aes_string(x="TideDif",y=i))
+  g<-g+geom_point()+geom_line(aes(colour=Date))+clean_theme
+  print(g)
+  h<-ggplot(data=env_temp,aes_string(x="NumericTime",y=i))
+  h<-h+geom_point()+geom_line(aes(colour=Date))+clean_theme
+  print(h)
+  print(i)
+  env_temp$difftimeAverage_temp=-as.numeric(difftime(N1$datetimeAverage[1],env_temp$DateTime))
+  env_temp$difftimeAverage_temp[1]=0
+  M2<-loess(as.formula(paste(i,"~","difftimeAverage_temp")),data=env_temp,span=0.19)
+  smoothed=as.data.frame(predict(M2))
+  smoothed$difftimeAverage_temp=env_temp$difftimeAverage_temp
+  print(ggplot(data=env_temp,aes_string(x="difftimeAverage_temp",y=i)) +geom_line()+xlab("Time")+ylab(i)+ggtitle("Loess Smoothing and Prediction") + geom_line(data=smoothed,aes(x=difftimeAverage_temp,y=`predict(M2)`,colour="red"))+clean_theme)
+  plot(M2)
+  print(summary(M2))
+  N1$difftimeAverage_temp<-as.numeric(N1$difftimeAverage)
+  N1[,i]=predict(M2,N1)
+  N1$difftimeAverage_temp<-NULL
+  
+  env_temp$Daynumeric<-NA
+  env_temp$fDate<-as.factor(env_temp$Date)
+  env_temp$TideDif2<-((env_temp$TideDif)^2)/60
+  env_temp$NumericTime2<-((env_temp$NumericTime)^2)/60
+  for (j in 1:length(unique(env_temp$Date))){
+    env_temp$Daynumeric[which(env_temp$Date==unique(env_temp$Date)[j])]=j
+  }
+  env_temp$Daynumeric2<-((env_temp$Daynumeric)^2)/4
+  M2<-lm(as.formula(paste(i,"~","TideDif+NumericTime+Daynumeric+TideDif2")),data=env_temp)
+  M3<-lm(as.formula(paste(i,"~","NumericTime+Date+TideDif")),data=env_temp)
+  M4<-lmer(as.formula(paste(i,"~","NumericTime+TideDif+(1|fDate)")),data=env_temp)
+  M5<-lm(as.formula(paste(i,"~","NumericTime+fDate")),data=env_temp)
+  M6<-lm(as.formula(paste(i,"~","TideDif+fDate")),data=env_temp)
+  print(paste("AIC time",i))
+  print(AIC(M5))
+  print(paste("AIC tide",i))
+  print(AIC(M6))
+  plot(M2)
+  plot(M3)
+  plot(M4)
+  plot(M5)
+  plot(M6)
+  print(summary(M2))
+  print(anova(M2))
+  print(summary(M3))
+  print(anova(M3))
+  print(anova(M4))
+  print(summary(M4))
+  plot(varpart(env_temp[,i],env_temp[,c("Daynumeric")],env_temp[,c("NumericTime")],env_temp[,c("TideDif")]),Xnames=c("Day","Time","Tide"),bg = c('navy', 'tomato','limegreen'))
+}
+```
+
+```{r}
+rcorr(as.matrix(env[,c(4:11)])) #check correlation of water conditions
+```
+
+```{r}
+#Simple linear models for water conditions
+env_temp<-env
+env_temp$difftimeAverage_temp=-as.numeric(difftime(N1$datetimeAverage[1],env_temp$DateTime))
+env_temp$difftimeAverage_temp[1]=0
+env_temp$Daynumeric<-NA
+env_temp$fDate<-as.factor(env_temp$Date)
+env_temp$TideDif2<-((env_temp$TideDif)^2)/60
+env_temp$NumericTime2<-((env_temp$NumericTime)^2)/60
+for (j in 1:length(unique(env_temp$Date))){
+  env_temp$Daynumeric[which(env_temp$Date==unique(env_temp$Date)[j])]=j
+}
+env_temp$Daynumeric2<-((env_temp$Daynumeric)^2)/4
+
+#Temperature
+MT1<-lm(as.formula(paste("T","~","NumericTime+fDate")),data=env_temp)
+summary(MT1)
+AIC(MT1)
+MT2<-lm(as.formula(paste("T","~","TideDif*fDate")),data=env_temp)
+summary(MT2) #best one
+AIC(MT2)
+plot(MT2)
+MT3<-lm(as.formula(paste("T","~","TideDif+fDate")),data=env_temp)
+summary(MT3) 
+AIC(MT3)
+plot(MT3)
+MT4<-lm(as.formula(paste("T","~","TideDif2+fDate")),data=env_temp)
+summary(MT4) 
+AIC(MT4)
+plot(MT4)
+
+#pH
+MpH1<-lm(as.formula(paste("pH","~","NumericTime+fDate")),data=env_temp)
+summary(MpH1) #best one
+plot(MpH1)
+AIC(MpH1)
+MpH4<-lm(as.formula(paste("pH","~","NumericTime*fDate")),data=env_temp)
+summary(MpH4) 
+plot(MpH4)
+AIC(MpH4)
+MpH2<-lm(as.formula(paste("pH","~","TideDif+fDate")),data=env_temp)
+summary(MpH2) 
+plot(MpH2)
+MpH3<-lm(as.formula(paste("pH","~","NumericTime2+fDate")),data=env_temp)
+summary(MpH3) 
+plot(MpH3)
+
+#DO
+MDO1<-lm(as.formula(paste("DO","~","NumericTime*fDate")),data=env_temp)
+summary(MDO1) #best one
+plot(MDO1)
+AIC(MDO1)
+MDO2<-lm(as.formula(paste("DO","~","TideDif+fDate")),data=env_temp)
+summary(MDO2) 
+plot(MDO2)
+AIC(MDO2)
+MDO3<-lm(as.formula(paste("DO","~","NumericTime2+fDate")),data=env_temp)
+summary(MDO3) 
+plot(MDO3)
+AIC(MDO3)
+MDO4<-lm(as.formula(paste("DO","~","fDate")),data=env_temp)
+summary(MDO4) 
+plot(MDO4)
+AIC(MDO4)
+
+#EC
+MEC1<-lm(as.formula(paste("EC","~","NumericTime+fDate")),data=env_temp)
+summary(MEC1)  #best one
+plot(MEC1)
+AIC(MEC1)
+MEC2<-lm(as.formula(paste("EC","~","TideDif+fDate")),data=env_temp)
+summary(MEC2) 
+plot(MEC2)
+AIC(MEC2)
+MEC3<-lm(as.formula(paste("EC","~","NumericTime2+fDate")),data=env_temp)
+summary(MEC3) 
+plot(MEC3)
+AIC(MEC3)
+MEC4<-lm(as.formula(paste("EC","~","fDate")),data=env_temp)
+summary(MEC4) 
+plot(MEC4)
+AIC(MEC4)
+```
+
+```{r}
+#Analyse linear models of water conditions as response and AEMs as predictors
+#Determine different types of R²
+env$Timediff<-as.numeric(difftime(env$DateTime[1],env$DateTime))
+env.time.weights<-aem.weight.time(env$Timediff) 
+env.aem<-aem.time(n=nrow(env),w=env.time.weights,moran=TRUE)
+env_temp=cbind(env,env.aem$aem[,which(env.aem$Moran$obs>0)])
+for (i in c("`1`","`2`","`3`","`4`","`5`","`6`","`7`","`8`","`9`","`10`","`11`","`12`","`13`","`14`","`15`","`16`","`17`","`18`","`19`","`20`","`21`")){
+  g=ggplot(data=env_temp,aes_string(x="DateTime",y=i))+geom_point()+geom_line()
+  print(g)
+}
+#NO2 no link with time
+for (i in c("PO4","NH4","NO3","pH","EC","T","DO","turbidity")){
+  env_temp_temp<-env_temp[which(is.na(env_temp[,i])==FALSE),]
+  #model_env<-forward.sel(env_temp_temp[,i],env_temp_temp[,c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21")], nperm=9999)
+  model_env<-forward.sel.par(env_temp_temp[,i],env_temp_temp[,c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21")])
+  print(i)
+  print(model_env)
+  aem.select.env <- sort(model_env$order[model_env$pval<=0.1])
+  R2.out <- R2.by.variable(env_temp_temp[,i], env_temp_temp[,c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21")], scale.Y=FALSE)
+  NumberAEMforScalogram<-ncol(env_temp_temp[,c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21")])
+  R2.out
+  plot(1:NumberAEMforScalogram, R2.out[,1], type="o", pch=22, cex=1.0, xlim=c(1,NumberAEMforScalogram), ylim=c(0,0.70), xlab="AEM 1-21", ylab="R-square", main=paste("Scalogram of positively correlated AEM, variable",i))
+  points(1:NumberAEMforScalogram, R2.out[,1], pch=15, col="white", cex=0.8)
+  points(aem.select.env, R2.out[aem.select.env,1], pch=15, cex=1.0)
+  #Directional and non-directional R2 
+  #Determine R squared residuals linear trend
+  model.lin<-lm(as.formula(paste(i,"~","DateTime")),data=env_temp_temp)
+  rsquared.residuals<-1-as.numeric(RsquareAdj(model.lin)[1])
+  #R squared for all AEM
+  model.AEM<-lm(as.formula(paste(i,"~",paste(c("`1`","`2`","`3`","`4`","`5`","`6`","`7`","`8`","`9`"), collapse="+"))),data=env_temp_temp)
+  rsquared.AEM<-as.numeric(RsquareAdj(model.AEM)[1])
+  #Nondirectional R2
+  rsquared.nondirectional<-rsquared.AEM*rsquared.residuals
+  print("rsquared.nondirectional")
+  print(rsquared.nondirectional)
+  #directional R2
+  rsquared.directional<-rsquared.AEM-rsquared.nondirectional
+  print("rsquared.directional")
+  print(rsquared.directional)
+}
+```
+
+```{r}
+stringToQuoser <- function(varName) {
+  wrapr::let(c(VARNAME = varName), quo(VARNAME))
+}
+```
+
+```{r}
+#Between and within variation of water conditions
+for (i in c("pH","EC","T","DO","turbidity")){
+  mean.ID <-as.data.frame(mean(unlist(env[,i]))-tapply(unlist(env[,i]), env$Date, mean))
+  colnames(mean.ID)="var"
+  mean.ID$type="between"
+  within.ID <- as.data.frame(unlist(env[,i]) - rep(tapply(unlist(env[,i]), env$Date, mean), table(env$Date)))
+  colnames(within.ID)="var"
+  within.ID$type="within"
+  x=rbind(mean.ID,within.ID)
+  g<-ggplot(data = x, aes(x=type, y=var)) + geom_boxplot() + ggtitle(i)+clean_theme
+  print(g)
+}
+```
+
+```{r}
+# Is there a linear temporal trend in the response data? Try-out for one specific transect
+Transect=2
+N1_Transect1=N1[which(N1$`Transect number`==Transect),]
+fish.mat_Transect1=fish.mat[which(N1$`Transect number`==Transect),]
+fauna.trend <- dbrda(fish.mat_Transect1~datetime,N1_Transect1,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+RsquareAdj(fauna.trend)
+# Examine the R-square and the p-value to decide if there is a significant temporal trend.
+# Detrend the response data (i.e. compute residuals) only if the trend is [highly] significant.
+# The MEM and AEM methods are equally suitable to analyze the temporal structure of the data.
+ordiresids(fauna.trend,main="dbRDA")
+plot(fauna.trend)
+```
+
+```{r}
+#Similar as previous but for the entire data set, accounting for transect as a factor in dbRDA
+fauna.trend <- dbrda(fish.mat~datetime+`Transect number`,N1,dist="bray")
+fauna.trend <- dbrda(fish.mat~datetime,N1,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+RsquareAdj(fauna.trend)
+ordiresids(fauna.trend,main="dbRDA")
+plot(fauna.trend)
+```
+
+```{r}
+#Temporal dbMEM
+# Construct the dbMEM eigenfunctions. Generate all dbMEM eigenfunctions
+# As used here, function dist() computes the number of days between sampling occasions
+time.mem.40 <- dbmem(dist(as.data.frame(N1_Transect1$difftime)), MEM.autocor="all", store.listw = TRUE, silent = TRUE)
+summary(time.mem.40)
+# Which dbMEM model positive temporal correlation?
+time.mem.40$MEM1
+barplot(attr(time.mem.40, "values"), 
+      main = "Eigenvalues of the temporal weighting matrix", cex.main = 0.7)
+plot(time.mem.40)
+time.mem.40$difftime=N1_Transect1$difftime
+#Compute the redundancy analysis (RDA) of the fauna by the dbMEM eigenvectors modelling
+# positive temporal correlation
+#time.mem.40.pos <- as.data.frame(time.mem.40[,time.mem.40$MEM1$Positive])
+for (i in 1:(ncol(time.mem.40)-1)){
+  j=colnames(time.mem.40)[i]
+  g=ggplot(data=time.mem.40,aes_string(x="difftime",y=j))+geom_point()+geom_line()
+  print(g)
+}
+```
+
+```{r}
+#Prepare coordinates
+library(SoDA)
+x=c(0.752014,0.752214,0.752361,0.752189,0.751922)
+y=c(90.309122,90.3091,90.309039,90.308861,90.3089)
+z=as.data.frame(cbind(x,y))
+xy <- geoXY(z$x, z$y, unit = 1)#in meters
+```
+
+```{r}
+#Spatial dbMEM
+thresh<-give.thresh(dist(xy))
+space.dbmem <- dbmem(xy, MEM.autocor="positive", store.listw = TRUE,thresh=thresh)
+summary(space.dbmem)
+barplot(attr(space.dbmem, "values"), 
+      main = "Eigenvalues of the spatial weighting matrix", cex.main = 0.7)
+plot(space.dbmem)
+attributes(space.dbmem)
+```
+
+```{r}
+#Tidal dbMEM
+thresh.tide<-give.thresh(dist(N1$TideDif))
+tide.dbmem <- dbmem(N1$TideDif, MEM.autocor="positive", store.listw = TRUE,thresh=thresh)
+summary(tide.dbmem)
+barplot(attr(tide.dbmem, "values"), 
+      main = "Eigenvalues of the temporal tide weighting matrix", cex.main = 0.7)
+plot(tide.dbmem)
+attributes(tide.dbmem)
+tide.dbmem<-as.data.frame(tide.dbmem)
+colnames(tide.dbmem)<-c("TideMEM1","TideMEM2","TideMEM3")
+```
+
+```{r}
+#Spatial MEM
+s.label(xy) #Plot sampling locations
+
+#Assign neigbours using distance
+nbnear1 <- dnearneigh(xy, 0, 100) 
+nbnear2 <- dnearneigh(xy, 0, thresh)
+# g1 <- adegraphics::s.label(xy, nb = nbnear1, pnb.edge.col = "red", main = "neighbors if 0<d<0.2", plot = FALSE)
+# g2 <- adegraphics::s.label(xy, nb = nbnear2, pnb.edge.col = "red", main = "neighbors if 0<d<1.5", plot = FALSE)
+# cbindADEg(g1, g2, plot = TRUE)
+
+#Assign neigbours using max number of neighbours
+knn1 <- knearneigh(xy, k = 1) 
+nbknn1 <- knn2nb(knn1, sym = TRUE)
+knn2 <- knearneigh(xy, k = 2)
+nbknn2 <- knn2nb(knn2, sym = TRUE)
+# g1 <- adegraphics::s.label(xy, nb = nbknn1, pnb.edge.col = "red", main = "Nearest neighbors (k=1)", plot = FALSE)
+# g2 <- adegraphics::s.label(xy, nb = nbknn2, pnb.edge.col = "red", main = "Nearest neighbors (k=2)", plot = FALSE)
+# cbindADEg(g1, g2, plot = TRUE)
+
+listwgab<-nb2listw(nbnear1)
+
+distgab <- nbdists(nbnear2, xy)
+fdist <- lapply(distgab, function(x) 1 - x/max(dist(xy)))
+listwgab <- nb2listw(nbnear2, glist = fdist, style = "B")
+listwgab
+
+mem.spatial<-mem(listwgab,MEM.autocor="positive")
+barplot(attr(mem.spatial, "values"), main = "Eigenvalues of the spatial weighting matrix", cex.main = 0.7)
+plot(mem.spatial)
+```
+
+```{r}
+#Space-time interaction models
+stimodel3<-stimodels_personal(Y=fish.mat,S=xy,Ti=as.matrix(unique(N1$difftimeAverage)),model="5",nperm=9999,Y.type="dist")
+stimodel3<-stimodels_personal(Y=fish.mat,S=xy,Ti=as.matrix(unique(N1$difftimeAverage)),model="2",nperm=9999,Y.type="dist")
+stimodel3<-stimodels_personal(Y=fish.mat,S=xy,Ti=as.matrix(unique(N1$difftimeAverage)),model="4",nperm=9999,Y.type="dist")
+```
+
+```{r}
+#K-means clustering of biological data, trying different number of clusters
+kmeanscluster<-cascadeKM(fish.mat,inf.gr=2, sup.gr=15, iter = 100, criterion = "ssi")
+plot(kmeanscluster)
+kmeanscluster.df<-as.data.frame((kmeanscluster[["partition"]]))
+kmeanscluster.df$Transect_number<-N1$`Transect number`
+kmeanscluster.df$datetime<-N1$datetimeAverage
+kmeanscluster.df<-kmeanscluster.df[,c("4 groups","Transect_number","datetime")]
+library(tidyr)
+kmeanscluster.df.heatmap<-spread(kmeanscluster.df, Transect_number, `4 groups`)
+rownames(kmeanscluster.df.heatmap)<-kmeanscluster.df.heatmap$datetime
+kmeanscluster.df.heatmap$datetime<-NULL
+```
+
+```{r}
+# AEM analysis for one transect (will be used to paste to every transect seperatly)
+# Construct the AEM eigenfunctions. Generate all AEM eigenfunctions.
+# Construct a vector of weigths for the edges, each representing the easiness of exchange
+# between adjacent dates (nodes).
+# The 'max.d' value used here to scale the distances through weighting function 1
+# (?weight.time) is the smallest distance for which no significant autocorrelation is found in the
+# multivariate Mantel correlogram (correlog.40, section 3.4 of this document; Fig. S3.8).
+weights<-aem.weight.time(N1_Transect1$difftime,alpha = 2) 
+aem_Transect1<-aem.time(n=nrow(N1_Transect1),w=weights,moran=TRUE) #positive AEMs will be used further on
+```
+
+```{r} 
+# Detail (not used further on, can be removed without consequences)
+# Construct the AEMs themselves
+aem_Transect1$Moran
+# How many AEM have positive Morans I > E(I) and model positive temporal correlation?
+# Compute the redundancy analysis (RDA) of the fauna by the matrix of AEM eigenvectors
+# modelling positive temporal correlation
+# fauna.aem_Transect1.pos <- rda(fish.mat_Transect1,aem_Transect1$aem[, which(aem_Transect1$Moran$obs>0)])
+fauna.aem_Transect1.pos <- dbrda(formula=fish.mat_Transect1 ~ .,data=as.data.frame(aem_Transect1$aem[, which(aem_Transect1$Moran$obs>0 & aem_Transect1$Moran$pvalue<=0.1)]),dist="bray") 
+anova(fauna.aem_Transect1.pos)
+RsquareAdj(fauna.aem_Transect1.pos)
+# Compute the redundancy analysis (RDA) of the fauna by the matrix of AEM eigenvectors
+# modelling negative temporal correlation
+fauna.aem_Transect1.neg <- dbrda(formula=fish.mat_Transect1 ~ .,data=as.data.frame(aem_Transect1$aem[, which(aem_Transect1$Moran$obs<0 & aem_Transect1$Moran$pvalue<=0.1)]),dist="bray")
+anova(fauna.aem_Transect1.neg )
+RsquareAdj(fauna.aem_Transect1.neg )
+# Select the AEM that are useful for modelling (positive)
+sel.aem_Transect1 <- forward.sel(fish.mat_Transect1, aem_Transect1$aem[, which(aem_Transect1$Moran$obs>0)], nperm=9999, alpha=0.15)
+sel.aem_Transect1
+# Do not include selected variables with p-values that are much larger than 0.05
+# Compare to the results of forward selection of AEM assuming equidistant observations.
+#Three models: all AEM selected, then those modelling positive and negative correlation
+aem.select <- sort(sel.aem_Transect1$order[sel.aem_Transect1$pval<=0.1])
+# Plot the selected AEM to see what they look like (Appendix S3, Figure S3.6)
+# The positive ones
+for(i in 1:ncol(aem_Transect1$aem[, which(aem_Transect1$Moran$obs>0)])) {
+  plot(as.data.frame(N1_Transect1$difftime), aem_Transect1$aem[,i], type="b", pch=19, main =
+  paste("Positive", aem.select[i]), xlab="Date", ylab="AEM")
+}
+# Compute RDA of the fauna by the selected AEM in each group (positive, negative), p <= 0.1
+fauna.aem_Transect1.pos.2 <- dbrda(fish.mat_Transect1~ ., as.data.frame(aem_Transect1$aem[,aem.select]),dist="bray")
+anova(fauna.aem_Transect1.pos.2, by="axis")
+RsquareAdj(fauna.aem_Transect1.pos.2)
+# Plot the RDA axes of the significant AEM models produced by the selected AEM
+# (Appendix S3, Figure S3.7)
+# The positive ones
+# for(i in 1:length(aem.select)) {
+#   plot(as.data.frame(N1_Transect1$difftime), scores(fauna.aem_Transect1.pos.2, display="lc", choices=i), type="b", pch=19, main = paste("RDA axis", i, ", positive temporal correlation model"), xlab="Time in minutes", ylab="RDA axis")
+# }
+
+```
+
+```{r}
+# 3.2.3. Scalogram of the AEM eigenfunctions
+# Compute semipartial R2 for each AEM modelling positive temporal correlation, separately
+# Function R2.by.variable() is found in file R_functions_for_Practicals.txt? loaded in sect. 2.2.
+R2.out <- R2.by.variable_PERSONAL(fish.mat_Transect1, aem_Transect1$aem[,which(aem_Transect1$Moran$obs>0)], scale.Y=FALSE)
+NumberAEMforScalogram<-ncol(aem_Transect1$aem[,which(aem_Transect1$Moran$obs>0)])
+R2.out
+# The output table lists the semipartial R2 computed separately for each dbMEM, the F-statistics
+# and the p-values of the semipartial test. The semipartial R2 will be used in the scalogram. The
+# test displayed in the table is very conservative because it tests the contribution of each MEM
+# eigenfunction above and beyond all other MEM variables in the analysis.
+# In the scalogram, the squares represent the semipartial R2 coefficients associated with each
+# MEM eigenfunction. We chose to highlight (black squares) the dbMEM that significantly
+# contribute sequentially to the explanation of the faunal response data, as in Legendre &
+# Legendre (2012, Fig. 14.5). These significant dbMEM are found in the output list of the
+# forward.sel() function. The scalogram produced here only concerns the dbMEM variables
+# modelling positive temporal correlation.
+# Plot the scalogram (Appendix S3, Figure S3.8)
+# Open squares: pch=22; filled black or white squares: pch=15.
+plot(1:NumberAEMforScalogram, R2.out[,1], type="o", pch=22, cex=1.0, xlim=c(1,NumberAEMforScalogram), ylim=c(0,0.40), xlab="AEM
+1-12", ylab="R-square", main=paste("Scalogram of positively correlated AEM, Transect",Transect))
+points(1:NumberAEMforScalogram, R2.out[,1], pch=15, col="white", cex=0.8)
+points(aem.select, R2.out[aem.select,1], pch=15, cex=1.0)
+```
+
+```{r}
+#Couple AEMs to biological data
+N1_Transect1=cbind(N1_Transect1,aem_Transect1$aem)
+N1_Transect1_subset=N1_Transect1[,c("datetimeAverage","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19")]
+N1$BeforeMerge=1:nrow(N1)
+N1<-merge(N1,N1_Transect1_subset,by="datetimeAverage")
+N1=N1[order(N1$BeforeMerge),]
+N1$BeforeMerge<-NULL
+```
+
+```{r}
+#Couple MEMs
+mem.spatial$`Transect number`=1:5
+N1varpartspat=N1
+N1varpartspat$BeforeMerge=1:nrow(N1varpartspat)
+N1varpartspat<-merge(N1varpartspat,mem.spatial,by="Transect number")
+N1varpartspat=N1varpartspat[order(N1varpartspat$BeforeMerge),]
+N1varpartspat$BeforeMerge<-NULL
+mem.spatial$`Transect number`<-NULL
+N1varpartspat$fTransect<-as.factor(N1varpartspat$`Transect number`)
+
+N1varpartspat$fDate<-as.factor(N1varpartspat$Date)
+N1varpartspat$TideDif2<-(N1varpartspat$TideDif)^2
+N1varpartspat$Daynumeric<-NA
+for (i in 1:length(unique(N1varpartspat$Date))){
+  N1varpartspat$Daynumeric[which(N1varpartspat$Date==unique(N1varpartspat$Date)[i])]=i
+}
+```
+
+```{r}
+pairs(N1varpartspat[,c("sand with rocks","rocks with sand","rocks","bedrock","complexity")])
+rcorr(as.matrix(N1varpartspat[,c("sand with rocks","rocks with sand","rocks","bedrock","complexity")]))
+```
+
+```{r}
+# Variation partitioning (spatial) Using Bray-Curtis data
+distance.measure="bray"
+
+#Variable selection for water conditions
+mod.dbrda.water<-dbrda(fish.mat ~ ., data=N1varpartspat[,c("pH","EC","T","DO","PO4","NO2","NH4","NO3","turbidity")],dist=distance.measure)
+mod.dbrda.water.0<-dbrda(fish.mat ~1, data=N1varpartspat[,c("pH","EC","T","DO","PO4","NO2","NH4","NO3","turbidity")],dist=distance.measure)
+mod.dbrda.water.sel<-ordiR2step(mod.dbrda.water.0,scope=formula(mod.dbrda.water),direction="forward",permutations=9999,R2scope=FALSE)
+anova(mod.dbrda.water.sel, step=1000, perm.max=1000)
+RsquareAdj(mod.dbrda.water.sel)
+ordiresids(mod.dbrda.water.sel)
+
+#Variable selection for physical habitats
+mod.dbrda.habitat<-dbrda(fish.mat ~ ., data=N1varpartspat[,c("sand with rocks","rocks with sand","rocks","bedrock","complexity")],dist=distance.measure)
+mod.dbrda.habitat.0<-dbrda(fish.mat ~ 1, data=N1varpartspat[,c("sand with rocks","rocks with sand","rocks","bedrock","complexity")],dist=distance.measure)
+mod.dbrda.habitat.sel<-ordiR2step(mod.dbrda.habitat.0,Pin = 0.05,scope=formula(mod.dbrda.habitat),direction="forward",permutations=9999)
+ordiresids(mod.dbrda.habitat.sel)
+
+#Variable selection for AEMs
+mod.dbrda.temporal<-dbrda(fish.mat ~ ., data=N1varpartspat[,c("1","2","3","4","5","6","7","8","9")],dist=distance.measure)
+mod.dbrda.temporal.0<-dbrda(fish.mat ~ 1, data=N1varpartspat[,c("1","2","3","4","5","6","7","8","9")],dist=distance.measure)
+mod.dbrda.temporal.sel<-ordiR2step(mod.dbrda.temporal.0,scope=formula(mod.dbrda.temporal),direction="forward",permutations=9999,R2scope=TRUE)
+ordiresids(mod.dbrda.temporal)
+
+#Variable selection for time variables
+mod.dbrda.temporal2<-dbrda(fish.mat ~ ., data=N1varpartspat[,c("TideDif","NumericTime","fDate","TideDif2","Repetition","Daynumeric")],dist=distance.measure)
+mod.dbrda.temporal2.0<-dbrda(fish.mat ~ 1, data=N1varpartspat[,c("TideDif","NumericTime","fDate","TideDif2","Repetition","Daynumeric")],dist=distance.measure)
+mod.dbrda.temporal2.sel<-ordiR2step(mod.dbrda.temporal2.0,scope=formula(mod.dbrda.temporal2),direction="forward",permutations=9999,R2scope=FALSE)
+ordiresids(mod.dbrda.temporal2.sel)
+
+#Variable selection for MEMs
+mod.dbrda.spatial<-dbrda(fish.mat ~ ., data=N1varpartspat[,colnames(mem.spatial)],dist=distance.measure)
+mod.dbrda.spatial.0<-dbrda(fish.mat ~ 1, data=N1varpartspat[,colnames(mem.spatial)],dist=distance.measure)
+mod.dbrda.spatial.sel<-ordiR2step(mod.dbrda.spatial.0,scope=formula(mod.dbrda.spatial),direction="forward",permutations=9999)
+ordiresids(mod.dbrda.spatial.sel)
+
+#Variation partitioning habitat, water quality, cat.Day, spatial MEM
+res.part.habitat.temporal.water <- varpart(vegdist(fish.mat,method=distance.measure),
+                                    N1varpartspat[,names(mod.dbrda.spatial.sel$CCA$envcentre)],
+                                    N1varpartspat[,c("fDate")],
+                                    N1varpartspat[,c("T","pH")],
+                                    N1varpartspat[,str_replace_all(names(mod.dbrda.habitat.sel$CCA$envcentre),"`","")]
+                                    #N1varpartspat[,c("rocks","bedrock")]
+                                    #N1varpartspat[,c("fTransect")]
+                                    #N1varpartspat[,c("sand with rocks","rocks with sand","rocks","bedrock")]
+                                    )
+res.part.habitat.temporal.water
+pdf("./figures/varpart.pdf")
+plot(res.part.habitat.temporal.water, digits=2,Xnames = c('Space', 'Daily variation', 'Water','Habitat'), bg = c('navy', 'tomato','limegreen','yellow'),cex=1.5)
+dev.off()
+```
+
+```{r}
+#Partial water conditions
+Condition.data=c(
+  names(mod.dbrda.habitat.sel$CCA$envcentre),
+  names(mod.dbrda.temporal.sel$CCA$envcentre),
+  names(mod.dbrda.spatial.sel$CCA$envcentre)
+  )
+form.water<-as.formula(paste("fish.mat","~", paste(names(mod.dbrda.water.sel$CCA$envcentre), collapse="+"),"+Condition(",paste(Condition.data, collapse="+"),")"))
+dbrda.water<-dbrda(form.water,N1varpartspat,dist=distance.measure)
+anova(dbrda.water, step=1000, perm.max=1000)
+RsquareAdj(dbrda.water)
+```
+
+```{r}
+#Partial Habitat
+Condition.data=c(
+  names(mod.dbrda.water.sel$CCA$envcentre),
+  names(mod.dbrda.temporal.sel$CCA$envcentre),
+  names(mod.dbrda.spatial.sel$CCA$envcentre)
+  )
+form.habitat<-as.formula(paste("fish.mat","~", paste(names(mod.dbrda.habitat.sel$CCA$envcentre), collapse="+"),"+Condition(",paste(Condition.data, collapse="+"),")"))
+dbrda.habitat<-dbrda(form.habitat,N1varpartspat,dist=distance.measure)
+anova(dbrda.habitat, step=1000, perm.max=1000)
+RsquareAdj(dbrda.habitat)
+```
+
+```{r}
+#Partial Temporal
+Condition.data=c(
+  names(mod.dbrda.water.sel$CCA$envcentre),
+  names(mod.dbrda.habitat.sel$CCA$envcentre),
+  names(mod.dbrda.spatial.sel$CCA$envcentre)
+  )
+form.temporal<-as.formula(paste("fish.mat","~", paste("fDate", collapse="+"),"+Condition(",paste(Condition.data, collapse="+"),")"))
+dbrda.temporal<-dbrda(form.temporal,N1varpartspat,dist=distance.measure)
+anova(dbrda.temporal, step=1000, perm.max=1000)
+RsquareAdj(dbrda.temporal)
+```
+
+```{r}
+#Partial Spatial and Habitat
+Condition.data=c(
+  names(mod.dbrda.water.sel$CCA$envcentre),
+  names(mod.dbrda.temporal.sel$CCA$envcentre)
+  )
+form.spatial.habitat<-as.formula(paste("fish.mat","~", paste(c(names(mod.dbrda.spatial.sel$CCA$envcentre),names(mod.dbrda.habitat.sel$CCA$envcentre)), collapse="+"),"+Condition(",paste(Condition.data, collapse="+"),")"))
+dbrda.spatial.habitat<-dbrda(form.spatial.habitat,N1varpartspat,dist=distance.measure)
+anova(dbrda.spatial.habitat, step=1000, perm.max=1000)
+RsquareAdj(dbrda.spatial.habitat)
+```
+
+```{r}
+#Partial Temporal and Water
+Condition.data=c(
+  names(mod.dbrda.spatial.sel$CCA$envcentre),
+  names(mod.dbrda.habitat.sel$CCA$envcentre)
+  )
+form.temporal.water<-as.formula(paste("fish.mat","~", paste(c(names(mod.dbrda.temporal.sel$CCA$envcentre),names(mod.dbrda.water.sel$CCA$envcentre)), collapse="+"),"+Condition(",paste(Condition.data, collapse="+"),")"))
+dbrda.temporal.water<-dbrda(form.temporal.water,N1varpartspat,dist=distance.measure)
+anova(dbrda.temporal.water, step=1000, perm.max=1000)
+RsquareAdj(dbrda.temporal.water)
+```
+
+```{r}
+#Determine R squared residuals linear trend
+fauna.trend <- dbrda(fish.mat~datetime+Condition(fTransect),N1varpartspat,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+rsquared.residuals<-1-as.numeric(RsquareAdj(fauna.trend)[1])
+#R squared for all AEM
+distance.measure="bray"
+Condition.data="Transect number"
+form.temporal<-as.formula(paste("fish.mat","~", paste(c("`1`","`2`","`3`","`4`","`5`","`6`","`7`","`8`","`9`"), collapse="+"),"+Condition(fTransect)"))
+dbrda.temporal<-dbrda(form.temporal,N1varpartspat,dist=distance.measure)
+rsquared.AEM<-as.numeric(RsquareAdj(mod.dbrda.temporal)[1])
+#Nondirectional R2
+rsquared.nondirectional<-rsquared.AEM*rsquared.residuals
+rsquared.nondirectional
+#directional R2
+rsquared.directional<-rsquared.AEM-rsquared.nondirectional
+rsquared.directional
+```
+
+```{r}
+#Determine R squared residuals linear trend
+#The adjusted R-squared compensates for the addition of variables and only increases if the new predictor enhances the model above what would be obtained by probability. Conversely, it will decrease when a predictor improves the model less than what is predicted by chance.
+fauna.trend <- dbrda(fish.mat~NumericTime+Condition(fTransect+fDate),N1varpartspat,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+rsquared<-as.numeric(RsquareAdj(fauna.trend)[2])
+rsquared
+fauna.trend <- dbrda(fish.mat~NumericTime+Daynumeric+Condition(fTransect),N1varpartspat,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+rsquared<-as.numeric(RsquareAdj(fauna.trend)[2])
+rsquared
+fauna.trend <- dbrda(fish.mat~NumericTime+fDate+Condition(fTransect),N1varpartspat,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+rsquared<-as.numeric(RsquareAdj(fauna.trend)[2])
+rsquared
+fauna.trend <- dbrda(fish.mat~NumericTime+fDate+fTransect,N1varpartspat,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+rsquared<-as.numeric(RsquareAdj(fauna.trend)[2])
+rsquared
+fauna.trend <- dbrda(fish.mat~NumericTime+Daynumeric+fTransect,N1varpartspat,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+rsquared<-as.numeric(RsquareAdj(fauna.trend)[2])
+rsquared
+fauna.trend <- dbrda(fish.mat~NumericTime+Daynumeric*fTransect,N1varpartspat,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+rsquared<-as.numeric(RsquareAdj(fauna.trend)[2])
+rsquared
+fauna.trend <- dbrda(fish.mat~NumericTime*fDate*fTransect,N1varpartspat,dist="bray")
+fauna.trend.0 <- dbrda(fish.mat~1,N1varpartspat,dist="bray")
+anova(fauna.trend, step=10000, perm.max=10000)
+rsquared<-as.numeric(RsquareAdj(fauna.trend)[2])
+rsquared
+```
+
+```{r}
+mod.dbrda.fauna.trend<-ordiR2step(fauna.trend.0,scope=formula(fauna.trend),direction="forward",permutations=9999)
+ordiresids(mod.dbrda.fauna.trend)
+summary(mod.dbrda.fauna.trend)
+RsquareAdj(mod.dbrda.fauna.trend)$r.squared
+
+mod.dbrda.habitat<-dbrda(fish.mat ~ Daynumeric*`sand with rocks`*`rocks with sand`*rocks*bedrock*complexity,data=N1varpartspat,dist="bray")
+mod.dbrda.habitat.0<-dbrda(fish.mat ~ 1, data=N1varpartspat,dist="bray")
+mod.dbrda.habitat.sel<-ordiR2step(mod.dbrda.habitat.0,scope=formula(mod.dbrda.habitat),direction="forward",permutations=9999,Pin=0.05)
+ordiresids(mod.dbrda.habitat.sel)
+```
+
+
+
+```{r}
+# 3.4. MULTIVARIATE CORRELOGRAM
+# See "Numerical ecology with R" (2011) and "Numerical ecology" (2012) for details.
+# Multivariate Mantel correlogram (Appendix S3, Figure S3.9)
+# See "Numerical Ecology" (2012), Section 13.1.6
+# See "Numerical Ecology with R" (2011), p. 235
+correlog <- mantel.correlog(vegdist(fish.mat_Transect1,method = "bray"), XY=N1_Transect1$difftimeAverage)
+plot(correlog)
+```
+
+```{r}
+
+#LCBD=LCBD.comp(D=vegdist(fish.mat,method = "bray"),sqrt.D = TRUE)
+N1=cbind(N1,N1varpartspat[,colnames(mem.spatial)])
+
+distance.measure="percentdiff"
+
+beta.temporal.store=NA
+for (i in 1:length(unique(N1$`Transect number`))){
+  N1_temp=N1[which(N1$`Transect number`==i),]
+  beta=beta.div(fish.mat[which(N1$`Transect number`==i),],method=distance.measure,sqrt.D=TRUE)
+  N1_temp$LCBD<-beta$LCBD
+  g<-ggplot(data=N1_temp,aes(x=difftimeAverage,y=N1_temp$LCBD))
+  g<-g+geom_point()+geom_line()+ggtitle("temporal LCBD")
+  print(g)
+  beta.temporal.store[i]=beta$beta[2]
+  
+  mod.lm.beta.temp.water<-lm(LCBD ~ 1+., data=N1_temp[,c("LCBD","pH","EC","T","DO","PO4","NO2","NH4","NO3")])
+  mod.lm.beta.temp.water.sel<-MASS::stepAIC(mod.lm.beta.temp.water, trace = FALSE,direction="both")
+  print(summary(mod.lm.beta.temp.water.sel))
+  plot(mod.lm.beta.temp.water.sel)
+  
+  if (i==1){
+    N1_temp_temporal<-N1_temp
+  } else {N1_temp_temporal<-rbind(N1_temp_temporal,N1_temp)}
+  
+}
+
+pairs(N1_temp_temporal[,c("LCBD","pH","EC","T","DO","PO4","NO2","NH4","NO3","DateTime")])
+#rcorr(as.matrix(N1_temp_temporal[,c("LCBD","pH","EC","T","DO","PO4","NO2","NH4","NO3")]))
+
+mod.lm.beta.temp.water<-lm(LCBD ~ 1+., data=N1_temp_temporal[,c("LCBD","pH","EC","T","DO","PO4","NO2","NH4","NO3")])
+mod.lm.beta.temp.water.sel<-MASS::stepAIC(mod.lm.beta.temp.water, trace=FALSE,direction="both")
+print(summary(mod.lm.beta.temp.water.sel))
+plot(mod.lm.beta.temp.water.sel)
+
+N1_temp_temporal$fDate=as.factor(N1_temp_temporal$Date)
+N1_temp_temporal$Daynumeric<-NA
+for (i in 1:length(unique(N1_temp_temporal$Date))){
+  N1_temp_temporal$Daynumeric[which(N1_temp_temporal$Date==unique(N1_temp_temporal$Date)[i])]=i
+}
+
+mod.lm.beta.temp.water<-lm(LCBD ~ 1+., data=N1_temp_temporal[,c("LCBD","NumericTime","fDate")])
+mod.lm.beta.temp.water.sel<-MASS::stepAIC(mod.lm.beta.temp.water, trace=FALSE,direction="both")
+print(summary(mod.lm.beta.temp.water.sel))
+plot(mod.lm.beta.temp.water.sel)
+
+res.part <- varpart(N1_temp_temporal$LCBD,N1_temp_temporal$NumericTime,N1_temp_temporal[,c("pH","T")])
+res.part
+print(plot(res.part, digits=2,Xnames = c('Tidal\ntime','Water'), bg = c('orange','limegreen'),cutoff = 0,cex=1.5))
+```
+
+```{r}
+HabitatShareTransect_beta<-HabitatShare_per_transect
+HabitatShareTransect_beta$beta<-beta.temporal.store
+pairs(HabitatShareTransect_beta)
+rcorr(as.matrix(HabitatShareTransect_beta[,-c(1,7)]))$P
+rcorr(as.matrix(HabitatShareTransect_beta[,-c(1,7)]))$r
+```
+
+```{r}
+beta.spatial.store=NA
+N1$fTransect<-as.factor(N1$Transect)
+N1$fDate=as.factor(N1$Date)
+N1$Daynumeric<-NA
+for (i in 1:length(unique(N1$Date))){
+  N1$Daynumeric[which(N1$Date==unique(N1$Date)[i])]=i
+}
+for (i in 1:length(unique(N1$Repetition))){
+  N1_temp=N1[which(N1$Repetition==unique(N1$Repetition)[i]),]
+  beta=beta.div(fish.mat[which(N1$Repetition==unique(N1$Repetition)[i]),],method=distance.measure,sqrt.D=TRUE)
+  N1_temp$LCBD<-beta$LCBD
+  N1_temp$pLCBD<-beta$p.LCBD
+  g<-ggplot(data=N1_temp,aes(x=`Transect number`,y=N1_temp$LCBD))
+  g<-g+geom_point()+geom_line()+ggtitle("spatial LCBD")
+  print(g)
+  beta.spatial.store[i]=beta$beta[2]
+  if (i==1){
+    N1_temp_spatial<-N1_temp
+  } else {N1_temp_spatial<-rbind(N1_temp_spatial,N1_temp)}
+}
+# Compute LCBD values per site, summed over the days, for each repetition separately
+N1_temp_spatial_per_site<-N1_temp_spatial %>%
+    dplyr::group_by(Repetition,fTransect) %>%
+    dplyr::summarize(LCBD_site = mean(LCBD, na.rm = TRUE))
+# Compute LCBD values per day, summed over the sites, for each repetition separately
+
+N1_temp_spatial_per_day<-N1_temp_spatial %>%
+    dplyr::group_by(Repetition,fDate) %>%
+    dplyr::summarize(LCBD_day = mean(LCBD, na.rm = TRUE))
+```
+
+```{r}
+beta.spatial.store=NA
+for (i in 1:length(unique(N1$difftimeAverage))){
+  N1_temp=N1[which(N1$difftimeAverage==unique(N1$difftimeAverage)[i]),]
+  beta=beta.div(fish.mat[which(N1$difftimeAverage==unique(N1$difftimeAverage)[i]),],method=distance.measure,sqrt.D=TRUE)
+  N1_temp$LCBD<-beta$LCBD
+  N1_temp$pLCBD<-beta$p.LCBD
+  g<-ggplot(data=N1_temp,aes(x=`Transect number`,y=N1_temp$LCBD))
+  g<-g+geom_point()+geom_line()+ggtitle("spatial LCBD")
+  print(g)
+  beta.spatial.store[i]=beta$beta[2]
+  if (i==1){
+    N1_temp_spatial<-N1_temp
+  } else {N1_temp_spatial<-rbind(N1_temp_spatial,N1_temp)}
+}
+
+N1_spatial_beta<-N1[which(N1$`Transect number`==1),]
+N1_spatial_beta$beta.spatial.store=beta.spatial.store
+h<-ggplot(data=N1_spatial_beta,aes(x=difftimeAverage,y=beta.spatial.store))+geom_point()+geom_line()+ggtitle("Spatial Beta diversity in function of time")
+h
+
+mod.lm.beta.spat.water<-lm(beta.spatial.store ~ 1+., data=N1_spatial_beta[,c("beta.spatial.store","pH","EC","T","DO","PO4","NO2","NH4","NO3")])
+mod.lm.beta.spat.water.sel<-MASS::stepAIC(mod.lm.beta.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.beta.spat.water.sel))
+plot(mod.lm.beta.spat.water.sel)
+
+#Null model is better than temporal model
+mod.lm.beta.spat.temporal<-lm(beta.spatial.store ~ 1+., data=N1_spatial_beta[,c("beta.spatial.store","1","2","3","4","5","6","7","8","9")])
+#summary(mod.lm.beta.spat.temporal)
+mod.lm.beta.spat.temporal.sel<-MASS::stepAIC(mod.lm.beta.spat.temporal, trace = FALSE,direction="both")
+print(summary(mod.lm.beta.spat.temporal.sel))
+plot(mod.lm.beta.spat.temporal.sel)
+
+N1_spatial_beta$fDate=as.factor(N1_spatial_beta$Date)
+mod.lm.beta.spat.temporal<-lm(beta.spatial.store ~ 1+., data=N1_spatial_beta[,c("beta.spatial.store","NumericTime","fDate")])
+#summary(mod.lm.beta.spat.temporal)
+mod.lm.beta.spat.temporal.sel<-MASS::stepAIC(mod.lm.beta.spat.temporal, trace = FALSE,direction="both")
+print(summary(mod.lm.beta.spat.temporal.sel))
+plot(mod.lm.beta.spat.temporal.sel)
+
+mod.lm.beta.spat.water.combo<-lm(beta.spatial.store ~ 1+., data=N1_spatial_beta[,c("beta.spatial.store","pH","EC","T","DO","PO4","NO2","NH4","NO3","1","2","3","4","5","6","7","8","9")])
+mod.lm.beta.spat.water.combo.sel<-MASS::stepAIC(mod.lm.beta.spat.water.combo, trace = FALSE,direction="forward")
+print(summary(mod.lm.beta.spat.water.combo.sel))
+plot(mod.lm.beta.spat.water.combo.sel)
+
+pdf("./figures/varpart_beta_spatial_tide.pdf")
+res.part <- varpart(N1_spatial_beta$beta.spatial.store,N1_spatial_beta$fDate,N1_spatial_beta[,c("TideDif")],N1_spatial_beta[,c("T","NO3")])
+res.part
+print(plot(res.part, digits=2,Xnames = c('Daily\nvariation','Tidal time','Water'), bg = c('tomato', 'orange','limegreen'),cutoff = 0,cex=1.5))
+dev.off()
+
+pdf("./figures/varpart_beta_spatial_time.pdf")
+res.part <- varpart(N1_spatial_beta$beta.spatial.store,N1_spatial_beta$fDate,N1_spatial_beta[,c("NumericTime")],N1_spatial_beta[,c("T","NO3")])
+res.part
+print(plot(res.part, digits=2,Xnames = c('Daily\nvariation','Time\nof day','Water'), bg = c('tomato', 'orange','limegreen'),cutoff = 0,cex=1.5))
+dev.off()
+
+for (i in c("`1`","`2`","`3`","`4`","`5`","`6`","`7`","`8`","`9`")){
+  g=ggplot(data=N1_spatial_beta,aes_string(x="datetimeAverage",y=i))+geom_point()+geom_line()
+  print(g)
+}
+```
+
+```{r}
+N1_temp_spatial$fDate=as.factor(N1_temp_spatial$Date)
+N1_temp_spatial$Daynumeric<-NA
+for (i in 1:length(unique(N1_temp_spatial$Date))){
+  N1_temp_spatial$Daynumeric[which(N1_temp_spatial$Date==unique(N1_temp_spatial$Date)[i])]=i
+}
+
+model<-lm(LCBD ~ 1+., data=N1_temp_spatial[,c("LCBD","pH","EC","T","DO","PO4","NO2","NH4","NO3")]) #Keep all
+model<-lm(LCBD ~ 1+., data=N1_temp_spatial[,c("LCBD","sand with rocks","rocks with sand","rocks","bedrock")]) #Keep all
+model<-lm(LCBD ~ 1+., data=N1_temp_spatial[,c("LCBD","NumericTime","fDate")]) #Keep all
+anova(model)
+model<-lm(LCBD ~ 1+., data=N1_temp_spatial[,c("LCBD","MEM1","MEM2")]) #Keep all
+anova(model)
+model.sel<-MASS::stepAIC(model, trace = FALSE,direction="forward")
+print(summary(model.sel))
+plot(model.sel)
+res.part <- varpart(N1_temp_spatial$LCBD,N1_temp_spatial[c("fDate","NumericTime")],N1_temp_spatial[,c("pH","EC","T","DO","PO4","NO2","NH4","NO3")],N1_temp_spatial[,c("sand with rocks","rocks with sand","rocks","bedrock")],N1_temp_spatial[,c("MEM1","MEM2")])
+res.part
+print(plot(res.part, digits=2,Xnames = c('Temporal\nvariation','Water','Habitat','Space'), bg = c('tomato', 'orange','limegreen','yellow'),cutoff = 0,cex=1.5))
+```
+
+```{r}
+distance.measure="hellinger"
+
+beta.temporal.store=NA
+for (i in 1:length(unique(N1$`Transect number`))){
+  N1_temp=N1[which(N1$`Transect number`==i),]
+  beta=beta.div(fish.mat[which(N1$`Transect number`==i),],method=distance.measure,sqrt.D=TRUE)
+  if (i==1){
+    x=as.data.frame(beta$SCBD)
+  } else x=cbind(x,as.data.frame(beta$SCBD))
+}
+
+y=as.data.frame(row_means(x))
+
+beta.spatial.store=NA
+for (i in 1:length(unique(N1$difftimeAverage))){
+  N1_temp=N1[which(N1$difftimeAverage==unique(N1$difftimeAverage)[i]),]
+  beta=beta.div(fish.mat[which(N1$difftimeAverage==unique(N1$difftimeAverage)[i]),],method=distance.measure,sqrt.D=TRUE)
+  if (i==1){
+    a=as.data.frame(beta$SCBD)
+  } else a=cbind(a,as.data.frame(beta$SCBD))
+}
+a=t(a)
+b=as.data.frame(row_means(a))
+```
+
+```{r}
+SW<-function(row,data.repeat){
+  row<-row[c(which(colnames(data.repeat) %in% colnames(specieslist)))]
+  row<-row[which(is.na(row)==FALSE & row!=0)]
+  numberofspecies=length(row)
+  if (numberofspecies==0){
+    H=0
+  }
+  if (numberofspecies!=0){
+    som=sum(row)
+    row<-row/som
+    H<-(-1)*sum(row*log(row))
+  }
+  return(H)
+}
+RUN.SW<-function(data.repeat){
+  data.repeat$H<-NA
+  for (i in 1:nrow(data.repeat)){
+    H<-SW(data.repeat[i,],data.repeat)
+    data.repeat$H[i]<-H
+  }
+  return(data.repeat)
+}
+N1<-RUN.SW(N1)
+```
+
+```{r}
+N1$fDate=as.factor(N1$Date)
+N1$Daynumeric<-NA
+for (i in 1:length(unique(N1$Date))){
+  N1$Daynumeric[which(N1$Date==unique(N1$Date)[i])]=i
+}
+```
+
+```{r}
+#alpha diversity
+mod.lm.alpha.spat.water<-lm(totalamountofspecies ~ 1+., data=N1[,c("totalamountofspecies","pH","EC","T","DO","PO4","NO2","NH4","NO3")])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+plot(mod.lm.alpha.spat.water.sel)
+
+mod.lm.alpha.spat.water<-lm(totalamountofspecies ~ 1+., data=N1[,c("totalamountofspecies","1","2","3","4","5","6","7","8","9")])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+plot(mod.lm.alpha.spat.water.sel)
+
+mod.lm.alpha.spat.water<-lm(totalamountofspecies ~ 1+., data=N1[,c("totalamountofspecies","NumericTime","fDate")])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+plot(mod.lm.alpha.spat.water.sel)
+
+N1$fTransect=as.factor(N1$`Transect number`)
+mod.lm.alpha.spat.water<-lm(totalamountofspecies ~ 1+., data=N1[,c("totalamountofspecies","sand with rocks","rocks with sand","rocks","bedrock")])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+plot(mod.lm.alpha.spat.water.sel)
+
+N1=cbind(N1,N1varpartspat[,colnames(mem.spatial)])
+mod.lm.alpha.spat.water<-lm(totalamountofspecies ~ 1+., data=N1[,c("totalamountofspecies",colnames(mem.spatial))])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+#plot(mod.lm.alpha.spat.water.sel)
+
+res.part <- varpart(N1$totalamountofspecies,N1[,c("pH","EC","T","NO2")],N1[,c("1","2","3")],N1$fDate)
+res.part
+print(plot(res.part, digits=2,Xnames = c('Water', 'Directional time', 'Daily variation'), bg = c('navy', 'tomato','limegreen'),cutoff = 0))
+
+pdf("./figures/varpart_SD.pdf")
+res.part <- varpart(N1$totalamountofspecies,N1$fDate,N1[,c("pH","EC","T","NO2")])
+res.part
+print(plot(res.part, digits=2,Xnames = c('Daily\nvariation','Water'), bg = c('tomato','limegreen'),cutoff = 0,cex=1.5))
+dev.off()
+```
+
+```{r}
+#H diversity
+mod.lm.alpha.spat.water<-lm(H ~ 1+., data=N1[,c("H","pH","EC","T","DO","PO4","NO2","NH4","NO3")])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+plot(mod.lm.alpha.spat.water.sel)
+
+mod.lm.alpha.spat.water<-lm(H ~ 1+., data=N1[,c("H","1","2","3","4","5","6","7","8","9")])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+plot(mod.lm.alpha.spat.water.sel)
+
+mod.lm.alpha.spat.water<-lm(H ~ 1+., data=N1[,c("H","NumericTime","fDate")])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+plot(mod.lm.alpha.spat.water.sel)
+
+mod.lm.alpha.spat.water<-lm(H ~ 1+., data=N1[,c("H","sand with rocks","rocks with sand","rocks","bedrock")])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+plot(mod.lm.alpha.spat.water.sel)
+
+mod.lm.alpha.spat.water<-lm(H ~ 1+., data=N1[,c("H",colnames(mem.spatial))])
+mod.lm.alpha.spat.water.sel<-MASS::stepAIC(mod.lm.alpha.spat.water, trace = FALSE,direction="both")
+print(summary(mod.lm.alpha.spat.water.sel))
+#plot(mod.lm.alpha.spat.water.sel)
+
+res.part <- varpart(N1$H,N1[,c("pH","T","NO2")],N1[,c("1","3")],N1$fDate,N1[c("rocks with sand","rocks","bedrock")])
+res.part
+print(plot(res.part, digits=2,Xnames = c('Water', 'Directional time', 'Daily variation', 'Habitat'), bg = c('navy', 'tomato','limegreen','yellow'),cutoff = 0))
+
+pdf("./figures/varpart_H.pdf")
+res.part <- varpart(N1$H,N1$MEM2,N1$fDate,N1[,c("pH","T","NO2")],N1[c("rocks with sand","rocks","bedrock")])
+res.part
+print(plot(res.part, digits=2,Xnames = c('Space','Daily variation','Water','Habitat'), bg = c('navy','tomato','limegreen','yellow'),cutoff = 0,cex=1.5))
+dev.off()
+```
+
+```{r}
+for (i in c("`10`","`11`","`12`","`13`","`14`","`15`","`16`","`17`","`18`","`19`")){
+  g=ggplot(data=N1_spatial_beta,aes_string(x="datetimeAverage",y=i))+geom_point()+geom_line()
+  print(g)
+}
+```
+
+
+```{r}
+# N1_for_Merge_univariate<-N1varpartspat[,c("Transect number","OnlyDate","Repetition","pH","EC","T","DO","PO4","NO2","NH4","NO3","1","2","3","4","5","6","7","MEM1","MEM2")]
+# N1_for_Merge_univariate$Transect=N1_for_Merge_univariate$`Transect number`
+# N1_for_Merge_univariate$`Transect number`<-NULL
+# N1_for_Merge_univariate$Date=N1_for_Merge_univariate$OnlyDate
+# N1_for_Merge_univariate$OnlyDate<-NULL
+# x=merge(df,N1_for_Merge_univariate,by=c("Transect","Date","Repetition"))
+# for (i in 1:length(unique(x$Species))){
+#   data.tot=as.data.frame(x[which(x$Species==unique(x$Species)[i]),c("density","fAbiotic","pH","EC","T","DO","PO4","NO2","NH4","NO3","1","2","3","4","5","6","7","MEM1","MEM2")])
+#   data.habitat=as.data.frame(x[which(x$Species==unique(x$Species)[i]),c("density","fAbiotic")])
+#   data.transect=as.data.frame(x[which(x$Species==unique(x$Species)[i]),c("density","fTransect")])
+#   data.env=as.data.frame(x[which(x$Species==unique(x$Species)[i]),c("density","pH","EC","T","DO","PO4","NO2","NH4","NO3")])
+#   data.spat=as.data.frame(x[which(x$Species==unique(x$Species)[i]),c("density","MEM1","MEM2")])
+#   data.temp=as.data.frame(x[which(x$Species==unique(x$Species)[i]),c("density","1","2","3","4","5","6","7")])
+#   
+#   M1<-lm(density~.,data=data.tot)
+#   M1.sel<-MASS::stepAIC(M1, trace = FALSE,direction="both")
+#   print(summary(M1.sel))
+#   plot(M1.sel)
+# }
+```
+
+```{r}
+#Test alternative methods for selecting variables of MEM and AEM
+
+```
+
+```{r}
+plot.glmmTMB<-function(model){
+  data$pred.link<-predict(model,data,type="link")
+  data$pred.response<-predict(model,data,type="response")
+  data$pred.conditional<-predict(model,data,type="conditional")
+  data$pred.zprob<-predict(model,data,type="zprob")
+  data$pred.zlink<-predict(model,data,type="zlink")
+  #data$res<-residuals(model)
+  
+  plot(data[,response],data$pred.link)
+  plot(data[,response],data$pred.response)
+  plot(data[,response],data$pred.conditional)
+  plot(data[,response],data$pred.zprob)
+  plot(as.factor(data$fDate),data$pred.zprob)
+  plot(as.factor(data$NumericTime),data$pred.zprob)
+  plot(as.factor(data$fTransect),data$pred.zprob)
+  plot(data[,response],data$pred.zlink)
+  plot(as.factor(data$fDate),data$pred.zlink)
+  plot(as.factor(data$NumericTime),data$pred.zlink)
+  plot(as.factor(data$fTransect),data$pred.zlink)
+  #plot(data$panamicsergeantmajor,data$res)
+  
+  print(AIC(model))
+  print(model$fit$obj)
+  
+  res = simulateResiduals(model)
+  plot(res)
+}
+```
+
+```{r eval=FALSE}
+library(glmmTMB)
+response=specieslist[1]
+data=N1
+family="compois"
+data$absTideDif=abs(data$TideDif)
+form<-as.formula(paste(response,"~", "1+(1|fDate)+(1|fTransect)"))
+#form<-as.formula(paste(response,"~", "fDate+NumericTime"))
+#form<-as.formula(paste(response,"~", "NumericTime+(1|fDate)"))
+M1 <- glmmTMB(form,
+                  ziformula=~1,
+                  data=data,
+                  family=family)
+summary(M1)
+#plot.glmmTMB(M1)
+res = simulateResiduals(M1)
+plot(res)
+#Anova.glmmTMB(M1)
+performance::icc(M1)
+```
+
+```{r}
+#Partial Mantel correlogram
+fish.mat<-Transformation_data(N1,"4root")
+fish.dist=vegdist(fish.mat, method="bray",binary=FALSE,diag = TRUE)
+```
+
+```{r}
+t=NA
+for (i in 1:nrow(N1)){
+  t[i]=min(abs(as.numeric(difftime(N1$datetime[i],env$DateTime))))
+}
+mean(t)
+sd(t)/sqrt(length(t))
+```
+
+
